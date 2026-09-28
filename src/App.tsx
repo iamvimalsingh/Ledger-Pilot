@@ -15,6 +15,7 @@ import { AuditHistoryModal } from './components/AuditHistoryModal';
 import { PrintView } from './components/PrintView';
 import { CreateProjectModal } from './components/CreateProjectModal';
 import { ExceptionInbox } from './components/ExceptionInbox';
+import { LocalOCRTestLab } from './components/LocalOCRTestLab';
 
 import {
   ExtractedRecord,
@@ -823,6 +824,8 @@ export function App() {
             language={settings.language}
           />
         )}
+
+        {currentTab === 'local-ocr-test' && <LocalOCRTestLab />}
       </main>
 
       {/* Mobile Bottom Navigation */}

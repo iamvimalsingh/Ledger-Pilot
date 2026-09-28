@@ -177,6 +177,17 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Share2 className="w-4 h-4 text-teal-600" />
               <span>{settings.language === 'hi' ? 'रिपोर्ट्स' : 'Reports'}</span>
             </button>
+            <button
+              onClick={() => onSelectTab('local-ocr-test')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors ${
+                currentTab === 'local-ocr-test'
+                  ? 'bg-amber-100 text-amber-950 font-bold border border-amber-300'
+                  : 'text-amber-800 bg-amber-50/70 hover:bg-amber-100/80 border border-amber-200/60'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>{settings.language === 'hi' ? 'लोकल OCR लैब' : 'Local OCR Test'}</span>
+            </button>
           </nav>
 
           {/* Action Icons */}
