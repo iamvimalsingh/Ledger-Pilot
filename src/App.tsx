@@ -231,6 +231,7 @@ export function App() {
     let extractedCount = 0;
     const newRecordsBatch: ExtractedRecord[] = [];
     const newDocsBatch: SourceDocument[] = [];
+    const failedErrors: string[] = [];
 
     for (const item of items) {
       const docId = `doc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -247,6 +248,17 @@ export function App() {
             existingHouseholds: households.map((h) => h.name),
           }),
         });
+
+        if (!response.ok) {
+          let errorMsg = `Server returned status ${response.status}`;
+          try {
+            const errData = await response.json();
+            if (errData && errData.error) errorMsg = errData.error;
+          } catch {
+            // response was not JSON
+          }
+          throw new Error(errorMsg);
+        }
 
         const data = await response.json();
 
@@ -295,107 +307,41 @@ export function App() {
           newRecordsBatch.push(...mappedRecords);
           extractedCount += mappedRecords.length;
         } else {
-          // If server returned an error (e.g. no GEMINI_API_KEY) or empty results
-          console.warn('AI Extraction error or fallback needed:', data.error);
-          throw new Error(data.error || 'Unable to extract records from image');
+          throw new Error(data.error || 'No recognizable ledger records found on this page.');
         }
       } catch (err: any) {
-        console.warn('Direct AI call failed, generating realistic extraction from document:', err);
-
-        // Resilient fallback: Create document and parse recognizable ledger lines
-        const doc: SourceDocument = {
-          id: docId,
-          fileName: item.fileName,
-          dataUrl: item.previewUrl,
-          pageNumber: item.pageNumber,
-          uploadedAt: Date.now(),
-          recordCount: 4,
-          detectedPageTotal: 5600,
-          pageHeader: `हस्तलिखित पन्ना ${item.pageNumber}`,
-          qualityNotes: 'Processed with local fallback parser.',
-        };
-        await saveDocumentImage(doc);
-        newDocsBatch.push(doc);
-
-        const sampleBatch: ExtractedRecord[] = [
-          {
-            id: `rec-${Date.now()}-1`,
-            sourceImageId: docId,
-            sourcePage: item.pageNumber,
-            name: 'दीपक कुमार',
-            amount: 500,
-            transactionType: 'INCOME',
-            currency: '₹',
-            paymentMode: 'Cash',
-            category: settings.categories[0] || 'Contribution',
-            purpose: 'सामान्य सहयोग',
-            date: '2026-08-25',
-            confidence: 'high',
-            rawText: 'दीपक कुमार - ₹500 [Cash]',
-            verified: false,
-            createdAt: Date.now(),
-          },
-          {
-            id: `rec-${Date.now()}-2`,
-            sourceImageId: docId,
-            sourcePage: item.pageNumber,
-            name: 'प्रो. एस. के. श्रीवास्तव',
-            amount: 2500,
-            transactionType: 'INCOME',
-            currency: '₹',
-            paymentMode: 'Online',
-            category: settings.categories[1] || 'Donation',
-            purpose: 'UPI Online',
-            date: '2026-08-25',
-            confidence: 'high',
-            rawText: 'प्रो. एस. के. श्रीवास्तव - ₹2,500 [Online - UPI]',
-            verified: false,
-            createdAt: Date.now(),
-          },
-          {
-            id: `rec-${Date.now()}-3`,
-            sourceImageId: docId,
-            sourcePage: item.pageNumber,
-            name: 'श्रीमती अनीता जैन',
-            amount: 1100,
-            transactionType: 'INCOME',
-            currency: '₹',
-            paymentMode: 'Cash',
-            category: settings.categories[2] || 'Member Fee',
-            purpose: 'सदस्य सहयोग',
-            date: '2026-08-25',
-            confidence: 'medium',
-            ambiguityNotes: 'Handwritten digit verified as ₹1,100',
-            rawText: 'श्रीमती अनीता जैन - ₹1,100 [Cash]',
-            verified: false,
-            createdAt: Date.now(),
-          },
-          {
-            id: `rec-${Date.now()}-4`,
-            sourceImageId: docId,
-            sourcePage: item.pageNumber,
-            name: 'विजय चौधरी',
-            amount: 1000,
-            transactionType: 'INCOME',
-            currency: '₹',
-            paymentMode: 'Online',
-            category: settings.categories[3] || 'Operations',
-            purpose: 'PhonePe',
-            date: '2026-08-25',
-            confidence: 'high',
-            rawText: 'विजय चौधरी - ₹1,000 [PhonePe]',
-            verified: false,
-            createdAt: Date.now(),
-          },
-        ];
-        newRecordsBatch.push(...sampleBatch);
-        extractedCount += sampleBatch.length;
+        console.error('AI Extraction failed for item:', item.fileName, err);
+        failedErrors.push(`${item.fileName || `Page ${item.pageNumber}`}: ${err?.message || 'Extraction failed'}`);
       }
     }
 
-    setDocuments((prev) => [...prev, ...newDocsBatch]);
-    setRecords((prev) => [...prev, ...newRecordsBatch]);
     setIsExtracting(false);
+
+    if (newDocsBatch.length > 0) {
+      setDocuments((prev) => [...prev, ...newDocsBatch]);
+      setRecords((prev) => [...prev, ...newRecordsBatch]);
+    }
+
+    if (failedErrors.length > 0 && newDocsBatch.length === 0) {
+      // Total failure - show error toast and fail closed
+      showToast(
+        settings.language === 'hi'
+          ? `❌ AI निष्कर्षण विफल: ${failedErrors[0]}। कृपया पुनः प्रयास करें।`
+          : `❌ Extraction failed: ${failedErrors[0]}. Please retry.`
+      );
+      return;
+    }
+
+    if (failedErrors.length > 0 && newDocsBatch.length > 0) {
+      // Partial failure
+      showToast(
+        settings.language === 'hi'
+          ? `⚠️ ${extractedCount} रिकॉर्ड्स निकाले गए, परंतु कुछ पन्नों में त्रुटि हुई: ${failedErrors.join('; ')}`
+          : `⚠️ Extracted ${extractedCount} records, but some pages failed: ${failedErrors.join('; ')}`
+      );
+      setCurrentTab('review');
+      return;
+    }
 
     showToast(
       settings.language === 'hi'
@@ -403,7 +349,7 @@ export function App() {
         : `🤖 AI extracted ${extractedCount} records! Please review.`
     );
 
-    // Switch to Review Tab
+    // Switch to Review Tab on success
     setCurrentTab('review');
   };
 
