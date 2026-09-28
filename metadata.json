@@ -1,0 +1,6 @@
+{
+  "name": "LedgerPilot",
+  "description": "Mobile-first AI handwritten ledger extraction system for colony collections, donation registers, and community accounting sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
