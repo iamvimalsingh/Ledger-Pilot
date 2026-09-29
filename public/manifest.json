@@ -1,0 +1,21 @@
+{
+  "id": "/",
+  "name": "LedgerPilot - Digital Ledger",
+  "short_name": "LedgerPilot",
+  "description": "Local-first digital ledger and khata diary for community collections, personal expenses, and shop transactions with deterministic calculations and backup portability.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#fafaf9",
+  "theme_color": "#047857",
+  "categories": ["finance", "business", "productivity"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

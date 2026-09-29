@@ -2,51 +2,45 @@ import React, { useState } from 'react';
 import {
   Share2,
   Printer,
-  FileText,
   Copy,
   Check,
   Download,
   CreditCard,
   Banknote,
-  PieChart,
-  Users,
-  Eye,
-  ExternalLink,
   MessageCircle,
+  TrendingUp,
+  TrendingDown,
+  PieChart,
 } from 'lucide-react';
-import { ExtractedRecord, SourceDocument, LedgerSettings } from '../types/ledger';
+import { LedgerEntry, SourceDocument, LedgerSettings } from '../types/ledger';
 import { generateWhatsAppSummary, openWhatsAppShare, shareOrCopySummary } from '../utils/whatsapp';
 import { formatINR, calculateReconciliationMetrics } from '../utils/reconciliation';
 
 interface ReportsViewProps {
-  records: ExtractedRecord[];
+  records: LedgerEntry[];
   documents: SourceDocument[];
-  onViewSource: (docId: string, recordId?: string) => void;
+  onViewSource?: (docId: string, recordId?: string) => void;
   onOpenPrint: () => void;
   settings: LedgerSettings;
-  language: 'hi' | 'en';
+  language?: 'hi' | 'en';
 }
 
-export const ReportsView: React.FC<ReportsViewProps> = ({
+export function ReportsView({
   records,
   documents,
-  onViewSource,
   onOpenPrint,
   settings,
-  language,
-}) => {
+  language = 'hi',
+}: ReportsViewProps) {
   const isHi = language === 'hi';
-  const [activeReportTab, setActiveReportTab] = useState<
-    'summary' | 'donors' | 'cash' | 'online' | 'categories' | 'evidence'
-  >('summary');
+  const [activeTab, setActiveTab] = useState<'summary' | 'categories' | 'modes'>('summary');
   const [copied, setCopied] = useState<boolean>(false);
 
   const metrics = calculateReconciliationMetrics(records);
-  const verifiedRecords = records.filter((r) => r.verified);
 
   const whatsappText = generateWhatsAppSummary({
-    title: settings.projectName || 'New Ledger',
-    records: records,
+    title: settings.projectName || 'My Ledger',
+    records,
     includeTopDonors: true,
   });
 
@@ -55,364 +49,273 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   const handleCopySummary = async () => {
-    const res = await shareOrCopySummary(whatsappText);
+    await shareOrCopySummary(whatsappText);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };
 
+  // Export CSV
+  const handleExportCSV = () => {
+    const headers = [
+      'क्रमांक (Sr)',
+      'प्रकार (Type)',
+      'नाम (Name)',
+      'राशि (Amount)',
+      'माध्यम (Mode)',
+      'श्रेणी (Category)',
+      'उद्देश्य (Purpose)',
+      'दिनांक (Date)',
+      'सत्यापित (Verified)',
+    ];
+
+    const rows = records.map((r) => [
+      r.serialNumber,
+      r.transactionType,
+      `"${(r.name || '').replace(/"/g, '""')}"`,
+      r.amount,
+      r.paymentMode,
+      `"${(r.category || '').replace(/"/g, '""')}"`,
+      `"${(r.purpose || '').replace(/"/g, '""')}"`,
+      r.date || '',
+      r.verified ? 'Yes' : 'No',
+    ]);
+
+    const csvContent =
+      'data:text/csv;charset=utf-8,\uFEFF' +
+      [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute(
+      'download',
+      `LedgerPilot_Report_${(settings.projectName || 'Ledger').replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
-    <div className="max-w-5xl mx-auto px-3 sm:px-6 py-6 pb-24 md:pb-12">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 pb-28 md:pb-12 space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="inline-flex items-center gap-1.5 bg-teal-100 text-teal-900 px-2.5 py-0.5 rounded-full text-xs font-semibold mb-1.5">
-            <FileText className="w-3.5 h-3.5 text-teal-600" />
-            <span>{isHi ? 'रिपोर्ट एवं साझाकरण केंद्र' : 'Reports & Export Center'}</span>
-          </div>
-          <h2 className="text-xl sm:text-2xl font-extrabold text-stone-900">
-            {isHi ? 'वित्तीय रिपोर्ट एवं WhatsApp शेयर' : 'Financial Reports & WhatsApp Share'}
+          <h2 className="text-xl sm:text-2xl font-extrabold text-stone-900 tracking-tight">
+            {isHi ? 'रिपोर्ट्स एवं शेयर (Reports & Share)' : 'Reports & Share'}
           </h2>
-          <p className="text-xs sm:text-sm text-stone-600">
+          <p className="text-xs text-stone-500 font-medium mt-0.5">
             {isHi
-              ? 'समरी, विस्तृत दाता सूची, कैश/ऑनलाइन अलग विवरण, और प्रिंटेबल दस्तावेज तैयार करें।'
-              : 'Generate comprehensive summaries, detailed registers, cash/online lists, and print-ready PDFs.'}
+              ? 'WhatsApp सारांश, प्रिंटेबल A4 बैलेंस शीट, एवं श्रेणीवार विश्लेषण'
+              : 'WhatsApp summary, formal A4 printable balance sheet, and analytics'}
           </p>
         </div>
 
-        {/* Primary Share & Print Actions */}
+        {/* Quick Export Actions */}
         <div className="flex items-center gap-2">
           <button
-            onClick={onOpenPrint}
-            className="px-4 py-2.5 rounded-xl text-xs font-bold bg-white text-stone-800 hover:bg-stone-50 border border-stone-300 shadow-2xs transition flex items-center gap-1.5"
+            onClick={handleExportCSV}
+            className="h-10 px-3.5 rounded-xl border border-stone-300 bg-white hover:bg-stone-50 text-stone-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <Printer className="w-4 h-4 text-stone-600" />
-            <span>{isHi ? '🖨 प्रिंट / PDF' : '🖨 Print / PDF'}</span>
+            <Download className="w-3.5 h-3.5" />
+            <span>{isHi ? 'CSV डाउनलोड' : 'CSV Export'}</span>
+          </button>
+
+          <button
+            onClick={onOpenPrint}
+            className="h-10 px-3.5 rounded-xl border border-stone-300 bg-white hover:bg-stone-50 text-stone-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            <span>{isHi ? 'प्रिंट / PDF' : 'Print / PDF'}</span>
           </button>
 
           <button
             onClick={handleShareWhatsApp}
-            className="px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition flex items-center gap-1.5"
+            className="h-10 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
           >
-            <MessageCircle className="w-4 h-4" />
-            <span>{isHi ? 'WhatsApp पर साझा करें' : 'Share on WhatsApp'}</span>
+            <MessageCircle className="w-3.5 h-3.5" />
+            <span>{isHi ? 'WhatsApp शेयर' : 'Share'}</span>
           </button>
         </div>
       </div>
 
-      {/* WhatsApp Clean Summary Card Box */}
-      <div className="mb-6 p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50/50 border border-emerald-200/80 shadow-2xs">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center">
-              <Share2 className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="font-bold text-sm text-emerald-950">
-                {isHi ? 'WhatsApp सारांश संदेश (Live Preview)' : 'WhatsApp Formatted Message'}
-              </h3>
-              <span className="text-[11px] text-emerald-800/80">
-                {isHi ? 'ग्रुप में भेजने हेतु तैयार पाठ' : 'Ready to forward to colony or event group'}
-              </span>
-            </div>
-          </div>
+      {/* Tabs */}
+      <div className="flex items-center gap-1 p-1 bg-stone-100 rounded-xl max-w-sm">
+        <button
+          onClick={() => setActiveTab('summary')}
+          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+            activeTab === 'summary' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-600 hover:text-stone-900'
+          }`}
+        >
+          {isHi ? 'WhatsApp सारांश' : 'WhatsApp'}
+        </button>
+        <button
+          onClick={() => setActiveTab('categories')}
+          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+            activeTab === 'categories' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-600 hover:text-stone-900'
+          }`}
+        >
+          {isHi ? 'श्रेणीवार विवरण' : 'Categories'}
+        </button>
+        <button
+          onClick={() => setActiveTab('modes')}
+          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+            activeTab === 'modes' ? 'bg-white text-stone-900 shadow-2xs' : 'text-stone-600 hover:text-stone-900'
+          }`}
+        >
+          {isHi ? 'नकद / ऑनलाइन' : 'Payment Modes'}
+        </button>
+      </div>
 
-          <div className="flex items-center gap-1.5">
+      {/* Tab 1: WhatsApp Summary */}
+      {activeTab === 'summary' && (
+        <div className="bg-white rounded-2xl border border-stone-200 p-5 sm:p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-sm sm:text-base text-stone-900">
+              {isHi ? 'WhatsApp संदेश पूर्वावलोकन' : 'WhatsApp Message Preview'}
+            </h3>
             <button
               onClick={handleCopySummary}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white text-emerald-900 border border-emerald-200 hover:bg-emerald-50 transition flex items-center gap-1"
+              className="h-8 px-3 rounded-lg border border-stone-200 hover:bg-stone-50 text-stone-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copied ? (isHi ? 'कॉपी हो गया!' : 'Copied!') : isHi ? 'कॉपी करें' : 'Copy'}</span>
+              {copied ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-700 stroke-[3]" />
+                  <span className="text-emerald-800">{isHi ? 'कॉपी हुआ!' : 'Copied!'}</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>{isHi ? 'कॉपी करें' : 'Copy'}</span>
+                </>
+              )}
             </button>
+          </div>
 
+          <div className="p-4 rounded-xl bg-stone-50 border border-stone-200/80 font-mono text-xs sm:text-sm text-stone-800 whitespace-pre-wrap leading-relaxed select-all">
+            {whatsappText}
+          </div>
+
+          <div className="flex justify-end">
             <button
               onClick={handleShareWhatsApp}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center gap-1 shadow-2xs"
+              className="h-11 px-5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold flex items-center gap-2 shadow-2xs transition-colors cursor-pointer"
             >
-              <ExternalLink className="w-3.5 h-3.5" />
-              <span>{isHi ? 'भेजें (Send)' : 'Send'}</span>
+              <MessageCircle className="w-4 h-4" />
+              <span>{isHi ? 'सीधे WhatsApp पर भेजें' : 'Send via WhatsApp'}</span>
             </button>
           </div>
         </div>
+      )}
 
-        {/* Message Bubble Preview */}
-        <pre className="p-3.5 bg-white rounded-xl border border-emerald-100 font-sans text-xs text-stone-800 whitespace-pre-wrap leading-relaxed shadow-2xs">
-          {whatsappText}
-        </pre>
-      </div>
+      {/* Tab 2: Category Breakdown */}
+      {activeTab === 'categories' && (
+        <div className="bg-white rounded-2xl border border-stone-200 p-5 sm:p-6 shadow-sm space-y-4">
+          <h3 className="font-bold text-sm sm:text-base text-stone-900">
+            {isHi ? 'मदवार / श्रेणीवार विश्लेषण' : 'Category Analysis'}
+          </h3>
 
-      {/* Report Selection Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-2 scrollbar-none mb-5">
-        {[
-          { id: 'summary', label: isHi ? 'A. सारांश रिपोर्ट' : 'A. Summary Report', icon: FileText },
-          { id: 'donors', label: isHi ? 'B. विस्तृत दाता सूची' : 'B. Detailed Donor List', icon: Users },
-          { id: 'cash', label: isHi ? 'C. कैश सूची' : 'C. Cash Register', icon: Banknote },
-          { id: 'online', label: isHi ? 'D. ऑनलाइन सूची' : 'D. Online Register', icon: CreditCard },
-          { id: 'categories', label: isHi ? 'E. श्रेणी रिपोर्ट' : 'E. Category Report', icon: PieChart },
-          { id: 'evidence', label: isHi ? 'F. स्रोत साक्ष्य सूची' : 'F. Source Evidence', icon: Eye },
-        ].map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeReportTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveReportTab(tab.id as any)}
-              className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 whitespace-nowrap ${
-                isActive
-                  ? 'bg-stone-900 text-white shadow-xs'
-                  : 'bg-white text-stone-600 hover:bg-stone-100 border border-stone-200'
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
-      </div>
+          {Object.keys(metrics.categoryTotals).length === 0 ? (
+            <p className="text-xs text-stone-500 py-4">
+              {isHi ? 'कोई श्रेणी डेटा उपलब्ध नहीं है।' : 'No category data recorded yet.'}
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {Object.entries(metrics.categoryTotals)
+                .sort(([, a], [, b]) => b.total - a.total)
+                .map(([category, data]) => {
+                  const maxTotal = Math.max(
+                    ...Object.values(metrics.categoryTotals).map((c) => c.total),
+                    1
+                  );
+                  const percentage = Math.round((data.total / maxTotal) * 100);
 
-      {/* Tab Content Display */}
-      <div className="bg-white rounded-2xl border border-stone-200 p-4 sm:p-6 shadow-2xs">
-        {/* A. Summary Report */}
-        {activeReportTab === 'summary' && (
-          <div className="space-y-4">
-            <h3 className="font-bold text-base text-stone-900 pb-2 border-b border-stone-100">
-              {isHi ? 'संग्रह सारांश रिपोर्ट' : 'Collection Executive Summary'}
-            </h3>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="p-3 bg-stone-50 rounded-xl">
-                <span className="text-[11px] text-stone-500 block">कुल संग्रह</span>
-                <span className="text-lg font-black text-stone-900 font-mono">
-                  {formatINR(metrics.totalCollection)}
-                </span>
-              </div>
-              <div className="p-3 bg-teal-50 rounded-xl">
-                <span className="text-[11px] text-teal-700 block">ऑनलाइन (UPI)</span>
-                <span className="text-lg font-black text-teal-900 font-mono">
-                  {formatINR(metrics.onlineTotal)}
-                </span>
-              </div>
-              <div className="p-3 bg-emerald-50 rounded-xl">
-                <span className="text-[11px] text-emerald-700 block">कैश (नकद)</span>
-                <span className="text-lg font-black text-emerald-900 font-mono">
-                  {formatINR(metrics.cashTotal)}
-                </span>
-              </div>
-              <div className="p-3 bg-amber-50 rounded-xl">
-                <span className="text-[11px] text-amber-800 block">सत्यापित दर</span>
-                <span className="text-lg font-black text-amber-950 font-mono">
-                  {metrics.verifiedRecordsCount}/{metrics.totalRecords}
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <h4 className="font-bold text-xs uppercase text-stone-500 mb-2">
-                {isHi ? 'श्रेणीवार विभाजन' : 'Category Breakdown'}
-              </h4>
-              <div className="divide-y divide-stone-100">
-                {Object.entries(metrics.categoryTotals).map(([cat, data]) => (
-                  <div key={cat} className="py-2 flex items-center justify-between text-xs">
-                    <span className="font-semibold text-stone-800">{cat}</span>
-                    <div className="text-right">
-                      <span className="font-bold font-mono text-stone-900">{formatINR(data.total)}</span>
-                      <span className="text-[11px] text-stone-400 ml-2">({data.count} रसीदें)</span>
+                  return (
+                    <div key={category} className="p-3.5 rounded-xl border border-stone-200 bg-stone-50/50">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="font-semibold text-sm text-stone-900">{category}</span>
+                        <span className="font-bold text-sm font-mono text-stone-900">
+                          {formatINR(data.total)}
+                        </span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-stone-200 overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-700 rounded-full transition-all"
+                          style={{ width: `${percentage}%` }}
+                        />
+                      </div>
+                      <p className="text-[11px] text-stone-500 mt-1.5">
+                        {data.count} {isHi ? 'प्रविष्टियां दर्ज हैं' : 'entries'}
+                      </p>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 3: Payment Modes Breakdown */}
+      {activeTab === 'modes' && (
+        <div className="bg-white rounded-2xl border border-stone-200 p-5 sm:p-6 shadow-sm space-y-4">
+          <h3 className="font-bold text-sm sm:text-base text-stone-900">
+            {isHi ? 'भुगतान माध्यम विश्लेषण' : 'Payment Mode Analysis'}
+          </h3>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Cash Box */}
+            <div className="p-4 rounded-xl border border-stone-200 bg-stone-50">
+              <div className="flex items-center gap-2 mb-2 text-stone-700">
+                <Banknote className="w-5 h-5 text-emerald-700" />
+                <span className="font-bold text-sm">{isHi ? 'नकद (Cash)' : 'Cash'}</span>
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-stone-500">{isHi ? 'नकद आय:' : 'Cash Income:'}</span>
+                  <span className="font-bold text-emerald-700 font-mono">
+                    +{formatINR(metrics.cashIncome)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-stone-500">{isHi ? 'नकद खर्च:' : 'Cash Expense:'}</span>
+                  <span className="font-bold text-rose-700 font-mono">
+                    -{formatINR(metrics.cashExpense)}
+                  </span>
+                </div>
+                <div className="pt-2 border-t border-stone-200 flex justify-between text-xs font-bold">
+                  <span>{isHi ? 'शुद्ध नकद शेष:' : 'Net Cash:'}</span>
+                  <span className="font-mono">{formatINR(metrics.cashIncome - metrics.cashExpense)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Online Box */}
+            <div className="p-4 rounded-xl border border-stone-200 bg-stone-50">
+              <div className="flex items-center gap-2 mb-2 text-stone-700">
+                <CreditCard className="w-5 h-5 text-indigo-700" />
+                <span className="font-bold text-sm">{isHi ? 'ऑनलाइन / बैंक (UPI)' : 'Online / UPI'}</span>
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-stone-500">{isHi ? 'ऑनलाइन आय:' : 'Online Income:'}</span>
+                  <span className="font-bold text-emerald-700 font-mono">
+                    +{formatINR(metrics.onlineIncome)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-stone-500">{isHi ? 'ऑनलाइन खर्च:' : 'Online Expense:'}</span>
+                  <span className="font-bold text-rose-700 font-mono">
+                    -{formatINR(metrics.onlineExpense)}
+                  </span>
+                </div>
+                <div className="pt-2 border-t border-stone-200 flex justify-between text-xs font-bold">
+                  <span>{isHi ? 'शुद्ध ऑनलाइन शेष:' : 'Net Online:'}</span>
+                  <span className="font-mono">{formatINR(metrics.onlineIncome - metrics.onlineExpense)}</span>
+                </div>
               </div>
             </div>
           </div>
-        )}
-
-        {/* B. Detailed Donor List */}
-        {activeReportTab === 'donors' && (
-          <div>
-            <h3 className="font-bold text-base text-stone-900 pb-2 border-b border-stone-100 mb-3">
-              {isHi ? 'विस्तृत दाता सूची (All Records)' : 'Detailed Contributor Register'}
-            </h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-stone-50 text-stone-500 font-semibold border-b border-stone-200">
-                  <tr>
-                    <th className="py-2.5 px-3">क्र.</th>
-                    <th className="py-2.5 px-3">नाम</th>
-                    <th className="py-2.5 px-3">राशि</th>
-                    <th className="py-2.5 px-3">माध्यम</th>
-                    <th className="py-2.5 px-3">श्रेणी</th>
-                    <th className="py-2.5 px-3">स्रोत</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100">
-                  {records.map((r, i) => (
-                    <tr key={r.id} className="hover:bg-stone-50">
-                      <td className="py-2.5 px-3 font-mono text-stone-400">{i + 1}</td>
-                      <td className="py-2.5 px-3 font-bold text-stone-900">{r.name}</td>
-                      <td className="py-2.5 px-3 font-black font-mono">{formatINR(r.amount)}</td>
-                      <td className="py-2.5 px-3">{r.paymentMode}</td>
-                      <td className="py-2.5 px-3">{r.category}</td>
-                      <td className="py-2.5 px-3">
-                        <button
-                          onClick={() => onViewSource(r.sourceImageId, r.id)}
-                          className="text-amber-700 hover:underline font-semibold"
-                        >
-                          पेज {r.sourcePage}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* C. Cash List */}
-        {activeReportTab === 'cash' && (
-          <div>
-            <div className="flex items-center justify-between pb-2 border-b border-stone-100 mb-3">
-              <h3 className="font-bold text-base text-stone-900">
-                {isHi ? 'कैश (नकद) संग्रह रजिस्टर' : 'Cash Collection Register'}
-              </h3>
-              <span className="font-black font-mono text-emerald-800 text-base">
-                {formatINR(metrics.cashTotal)}
-              </span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-emerald-50/50 text-stone-500 font-semibold border-b border-stone-200">
-                  <tr>
-                    <th className="py-2.5 px-3">क्र.</th>
-                    <th className="py-2.5 px-3">नाम</th>
-                    <th className="py-2.5 px-3">राशि</th>
-                    <th className="py-2.5 px-3">श्रेणी</th>
-                    <th className="py-2.5 px-3">पेज</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100">
-                  {records
-                    .filter((r) => r.paymentMode === 'Cash')
-                    .map((r, i) => (
-                      <tr key={r.id}>
-                        <td className="py-2.5 px-3 font-mono text-stone-400">{i + 1}</td>
-                        <td className="py-2.5 px-3 font-bold text-stone-900">{r.name}</td>
-                        <td className="py-2.5 px-3 font-black font-mono">{formatINR(r.amount)}</td>
-                        <td className="py-2.5 px-3">{r.category}</td>
-                        <td className="py-2.5 px-3 text-stone-500">पेज {r.sourcePage}</td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* D. Online List */}
-        {activeReportTab === 'online' && (
-          <div>
-            <div className="flex items-center justify-between pb-2 border-b border-stone-100 mb-3">
-              <h3 className="font-bold text-base text-stone-900">
-                {isHi ? 'ऑनलाइन (UPI / GPay / QR) रजिस्टर' : 'Online / UPI Register'}
-              </h3>
-              <span className="font-black font-mono text-teal-800 text-base">
-                {formatINR(metrics.onlineTotal)}
-              </span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-teal-50/50 text-stone-500 font-semibold border-b border-stone-200">
-                  <tr>
-                    <th className="py-2.5 px-3">क्र.</th>
-                    <th className="py-2.5 px-3">नाम</th>
-                    <th className="py-2.5 px-3">राशि</th>
-                    <th className="py-2.5 px-3">श्रेणी</th>
-                    <th className="py-2.5 px-3">विवरण / Trx ID</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100">
-                  {records
-                    .filter((r) => r.paymentMode === 'Online')
-                    .map((r, i) => (
-                      <tr key={r.id}>
-                        <td className="py-2.5 px-3 font-mono text-stone-400">{i + 1}</td>
-                        <td className="py-2.5 px-3 font-bold text-stone-900">{r.name}</td>
-                        <td className="py-2.5 px-3 font-black font-mono text-teal-900">
-                          {formatINR(r.amount)}
-                        </td>
-                        <td className="py-2.5 px-3">{r.category}</td>
-                        <td className="py-2.5 px-3 text-stone-500">{r.purpose || 'UPI Online'}</td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* E. Category Report */}
-        {activeReportTab === 'categories' && (
-          <div>
-            <h3 className="font-bold text-base text-stone-900 pb-2 border-b border-stone-100 mb-3">
-              {isHi ? 'मदवार (Category-wise) रिपोर्ट' : 'Category Analysis'}
-            </h3>
-            <div className="space-y-4">
-              {Object.entries(metrics.categoryTotals).map(([cat, data]) => (
-                <div key={cat} className="p-3 bg-stone-50 rounded-xl border border-stone-200">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold text-sm text-stone-900">{cat}</span>
-                    <span className="font-black font-mono text-stone-900">{formatINR(data.total)}</span>
-                  </div>
-                  <div className="text-[11px] text-stone-500">
-                    कुल {data.count} रसीदें दर्ज हैं।
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* F. Source Evidence List */}
-        {activeReportTab === 'evidence' && (
-          <div>
-            <h3 className="font-bold text-base text-stone-900 pb-2 border-b border-stone-100 mb-3">
-              {isHi ? 'मूल हस्तलिखित दस्तावेज साक्ष्य (Source Evidence)' : 'Original Source Documents'}
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {documents.map((doc) => (
-                <div
-                  key={doc.id}
-                  className="rounded-xl border border-stone-200 p-3 bg-stone-50 flex items-center justify-between gap-3"
-                >
-                  <div className="flex items-center gap-3">
-                    <img
-                      src={doc.dataUrl}
-                      alt={doc.fileName}
-                      className="w-14 h-18 object-cover rounded border border-stone-300 shadow-2xs"
-                    />
-                    <div>
-                      <div className="font-bold text-xs text-stone-900">{doc.pageHeader || doc.fileName}</div>
-                      <div className="text-[11px] text-stone-500">पेज सं: {doc.pageNumber}</div>
-                      {doc.detectedPageTotal && (
-                        <div className="text-[11px] text-amber-700 font-bold">
-                          लिखित योग: {formatINR(doc.detectedPageTotal)}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => onViewSource(doc.id)}
-                    className="px-3 py-1.5 text-xs font-bold bg-white text-stone-800 border border-stone-300 rounded-lg hover:bg-stone-100 shadow-2xs flex items-center gap-1"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>{isHi ? 'देखें' : 'View'}</span>
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
-};
+}

@@ -287,6 +287,7 @@ async function startServer() {
       res.sendFile(path.resolve(distPath, 'index.html'));
     });
   } else {
+    app.use(express.static(path.resolve(__dirname, 'public')));
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

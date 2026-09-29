@@ -1,6 +1,6 @@
 {
   "name": "LedgerPilot",
-  "description": "Mobile-first AI handwritten ledger extraction system for colony collections, donation registers, and community accounting sheets.",
+  "description": "Local-first digital ledger and khata diary for community collections, personal expenses, and shop transactions with deterministic calculations and backup portability.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

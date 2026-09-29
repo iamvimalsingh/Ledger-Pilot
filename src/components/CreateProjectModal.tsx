@@ -1,43 +1,55 @@
 import React, { useState } from 'react';
-import { X, FolderPlus, Sparkles, Check, BookOpen } from 'lucide-react';
+import { X, BookOpen, Check } from 'lucide-react';
+import { ProjectType } from '../types/ledger';
 
 interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (projectName: string, initialCategories: string[]) => void;
-  language: 'hi' | 'en';
+  onCreate: (projectName: string, initialCategories: string[], type: ProjectType) => void;
+  language?: 'hi' | 'en';
 }
 
-const PRESETS = [
+const PRESETS: Array<{
+  id: ProjectType;
+  labelHi: string;
+  labelEn: string;
+  categories: string[];
+}> = [
   {
     id: 'general',
-    nameHi: 'सामान्य वित्तीय (General Financial)',
-    nameEn: 'General Financial',
-    categories: ['Donation', 'Contribution', 'Member Fee', 'Expense', 'Maintenance', 'Operations', 'Other'],
+    labelHi: 'सामान्य',
+    labelEn: 'General',
+    categories: ['Donation', 'Member Fee', 'Expense', 'Maintenance', 'Operations', 'Other'],
+  },
+  {
+    id: 'personal',
+    labelHi: 'घरेलू / व्यक्तिगत',
+    labelEn: 'Personal / Home',
+    categories: ['राशन/किराना', 'दूध/सब्जी', 'बिजली/पानी बिल', 'दवा/चिकित्सा', 'वेतन/आय', 'अन्य खर्च'],
+  },
+  {
+    id: 'business',
+    labelHi: 'दुकान / व्यापार',
+    labelEn: 'Shop / Business',
+    categories: ['बिक्री/कमाई', 'माल खरीद', 'दुकान किराया', 'मजदूरी/स्टाफ', 'अन्य खर्च'],
   },
   {
     id: 'society',
-    nameHi: 'सोसाइटी / कॉलोनी (Housing Society)',
-    nameEn: 'Housing Society / Welfare',
-    categories: ['Maintenance Fee', 'Security', 'Electricity & Water', 'Facility Booking', 'Repairs', 'Expense', 'Other'],
-  },
-  {
-    id: 'school',
-    nameHi: 'स्कूल / ट्रस्ट (School / Institution)',
-    nameEn: 'School / Institution / Trust',
-    categories: ['Tuition Fee', 'Development Fund', 'Exam Fee', 'Staff Salary', 'Supplies', 'Maintenance', 'Other'],
+    labelHi: 'सोसायटी / ट्रस्ट',
+    labelEn: 'Society / Trust',
+    categories: ['मेंटेनेंस', 'सुरक्षा', 'बिजली-पानी', 'चंदा/सहयोग', 'मरम्मत', 'अन्य'],
   },
 ];
 
-export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
+export function CreateProjectModal({
   isOpen,
   onClose,
   onCreate,
-  language,
-}) => {
+  language = 'hi',
+}: CreateProjectModalProps) {
   const isHi = language === 'hi';
   const [projectName, setProjectName] = useState<string>('');
-  const [selectedPreset, setSelectedPreset] = useState<string>('general');
+  const [selectedPreset, setSelectedPreset] = useState<ProjectType>('general');
   const [error, setError] = useState<string>('');
 
   if (!isOpen) return null;
@@ -46,38 +58,41 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     e.preventDefault();
     const trimmed = projectName.trim();
     if (!trimmed) {
-      setError(isHi ? 'कृपया प्रोजेक्ट का नाम दर्ज करें' : 'Please enter a project name');
+      setError(isHi ? 'कृपया खाते का नाम लिखें' : 'Please enter a ledger name');
       return;
     }
 
     const preset = PRESETS.find((p) => p.id === selectedPreset) || PRESETS[0];
-    onCreate(trimmed, preset.categories);
+    onCreate(trimmed, preset.categories, selectedPreset);
     setProjectName('');
     setError('');
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-stone-200 my-auto animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 bg-stone-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+      <div
+        className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-stone-200 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between pb-3 mb-4 border-b border-stone-200">
+        <div className="flex items-center justify-between pb-3.5 mb-4 border-b border-stone-200">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center shadow-xs">
-              <FolderPlus className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-xl bg-emerald-700 text-white flex items-center justify-center shadow-xs">
+              <BookOpen className="w-5 h-5" />
             </div>
             <div>
               <h3 className="font-bold text-base text-stone-900">
-                {isHi ? 'नया लेजर प्रोजेक्ट बनाएं' : 'Create New Project'}
+                {isHi ? 'नया हिसाब शुरू करें' : 'Create New Ledger'}
               </h3>
-              <p className="text-[11px] text-stone-500">
-                {isHi ? 'अपने खाते अथवा संग्रह का नाम तय करें' : 'Set up a clean new ledger project'}
+              <p className="text-xs text-stone-500 font-medium">
+                {isHi ? 'अपने बहीखाते का नाम तय करें' : 'Give your new ledger a clear name'}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-stone-400 hover:text-stone-700 transition"
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -86,8 +101,8 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Project Name Input */}
           <div>
-            <label className="font-semibold text-stone-800 text-xs block mb-1">
-              {isHi ? 'प्रोजेक्ट का नाम (Project Name) *' : 'Project Name *'}
+            <label className="font-semibold text-stone-700 text-xs block mb-1.5">
+              {isHi ? 'हिसाब का नाम *' : 'Ledger Name *'}
             </label>
             <input
               type="text"
@@ -97,80 +112,62 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                 setProjectName(e.target.value);
                 if (error) setError('');
               }}
-              placeholder={isHi ? 'उदा. स्कूल वार्षिक कोष, वेलफेयर ट्रस्ट, क्लब 2026' : 'e.g. School Annual Fund, Welfare Society, Q3 Audit'}
-              className={`w-full px-3.5 py-2.5 border rounded-xl text-sm font-medium transition focus:outline-none focus:ring-2 ${
+              placeholder={isHi ? 'जैसे: दुकान का हिसाब, घरेलू खर्च, चंदा रजिस्टर' : 'e.g. Shop Daily Khata, Home Expenses, Fund'}
+              className={`w-full h-12 px-3.5 rounded-xl border bg-white text-base text-stone-900 focus:outline-none transition-all ${
                 error
-                  ? 'border-rose-400 focus:ring-rose-200'
-                  : 'border-stone-300 focus:ring-amber-500/20 focus:border-amber-500'
+                  ? 'border-rose-500 ring-2 ring-rose-100'
+                  : 'border-stone-300 focus:border-stone-900 focus:ring-2 focus:ring-stone-200'
               }`}
             />
-            {error ? (
-              <span className="text-[11px] text-rose-600 mt-1 block font-medium">{error}</span>
-            ) : (
-              <span className="text-[10px] text-stone-500 mt-1 block">
-                {isHi
-                  ? 'यह नाम डैशबोर्ड, लेजर, प्रिंट, और WhatsApp रिपोर्ट में दिखाई देगा।'
-                  : 'This name appears across your Dashboard, Verified Ledger, Reports, Print, and WhatsApp exports.'}
-              </span>
-            )}
+            {error && <p className="text-xs text-rose-600 font-medium mt-1">{error}</p>}
           </div>
 
-          {/* Category Preset Picker */}
+          {/* Preset Category Selector */}
           <div>
-            <label className="font-semibold text-stone-800 text-xs block mb-1.5">
-              {isHi ? 'श्रेणी टेम्पलेट (Category Template)' : 'Category Template'}
+            <label className="font-semibold text-stone-700 text-xs block mb-1.5">
+              {isHi ? 'प्रकार चुनें (Preset)' : 'Choose Type'}
             </label>
-            <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
               {PRESETS.map((preset) => {
                 const isSelected = selectedPreset === preset.id;
                 return (
-                  <div
+                  <button
                     key={preset.id}
+                    type="button"
                     onClick={() => setSelectedPreset(preset.id)}
-                    className={`p-2.5 rounded-xl border cursor-pointer transition text-xs flex items-center justify-between ${
+                    className={`h-11 px-3 rounded-xl border text-left text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
                       isSelected
-                        ? 'border-amber-600 bg-amber-50/60 ring-1 ring-amber-600/30'
-                        : 'border-stone-200 hover:border-stone-300 bg-white'
+                        ? 'border-emerald-700 bg-emerald-50/80 text-emerald-900 ring-1 ring-emerald-700'
+                        : 'border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-700'
                     }`}
                   >
-                    <div>
-                      <span className="font-bold text-stone-900 block">
-                        {isHi ? preset.nameHi : preset.nameEn}
-                      </span>
-                      <span className="text-[10px] text-stone-500 line-clamp-1 mt-0.5">
-                        {preset.categories.slice(0, 4).join(', ')}...
-                      </span>
-                    </div>
-                    {isSelected && (
-                      <div className="w-5 h-5 rounded-full bg-amber-600 text-white flex items-center justify-center shrink-0">
-                        <Check className="w-3.5 h-3.5" />
-                      </div>
-                    )}
-                  </div>
+                    <span>{isHi ? preset.labelHi : preset.labelEn}</span>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-emerald-700 stroke-[3]" />}
+                  </button>
                 );
               })}
             </div>
           </div>
 
           {/* Action Buttons */}
-          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-stone-200">
+          <div className="pt-3 border-t border-stone-200 flex items-center justify-end gap-2.5">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-stone-600 hover:bg-stone-100 transition"
+              className="h-11 px-4 rounded-xl border border-stone-300 text-stone-700 text-sm font-semibold hover:bg-stone-100 transition-colors cursor-pointer"
             >
               {isHi ? 'रद्द करें' : 'Cancel'}
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-xs transition flex items-center gap-1.5"
+              className="h-11 px-6 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 text-white text-sm font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
             >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>{isHi ? 'प्रोजेक्ट शुरू करें' : 'Create Project'}</span>
+              <Check className="w-4 h-4 stroke-[2.5]" />
+              <span>{isHi ? 'हिसाब शुरू करें' : 'Start Ledger'}</span>
             </button>
           </div>
         </form>
       </div>
     </div>
   );
-};
+}

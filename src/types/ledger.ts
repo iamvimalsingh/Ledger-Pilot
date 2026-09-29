@@ -6,6 +6,20 @@ export type ConfidenceLevel = 'high' | 'medium' | 'low';
 
 export type PageValidationStatus = 'MATCH' | 'MISMATCH' | 'NO_PAGE_TOTAL';
 
+export type AIAssistanceMode = 'OFF' | 'SMART' | 'ON-DEMAND';
+
+export type EntrySource = 'MANUAL' | 'LOCAL_OCR' | 'AI_ASSISTED' | 'IMPORT';
+
+export type ProjectType = 'general' | 'society' | 'business' | 'personal';
+
+export interface AIBudgetStats {
+  pagesProcessed: number;
+  totalRows: number;
+  localOnlyRows: number;
+  aiAssistedRows: number;
+  geminiRequests: number;
+}
+
 export interface PageMathValidation {
   docId: string;
   pageNumber: number;
@@ -43,27 +57,53 @@ export interface AuditRecord {
   correctedReason?: string;
 }
 
-export interface ExtractedRecord {
+export interface LedgerProject {
   id: string;
-  sourceImageId: string;
-  sourcePage: number;
+  name: string;
+  description?: string;
+  type: ProjectType;
+  currency: string;
+  categories: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface LedgerEntry {
+  id: string;
+  projectId?: string;
+  serialNumber?: number;
+  transactionType: TransactionType;
   name: string;
   amount: number;
-  transactionType: TransactionType;
   currency: string;
   paymentMode: PaymentMode;
   category: string;
   purpose?: string;
   date?: string;
-  householdName?: string;
-  householdId?: string;
-  confidence: ConfidenceLevel;
-  ambiguityNotes?: string;
-  rawText?: string;
+  time?: string;
+  notes?: string;
+  source?: EntrySource;
+  extractionSource?: 'LOCAL_OCR' | 'AI_ASSISTED' | 'MANUAL';
   verified: boolean;
   createdAt: number;
+  updatedAt?: number;
+
+  // OCR and Document traceability
+  sourceImageId?: string;
+  sourcePage?: number;
+  sourceRow?: number;
+  boundingBox?: { x0: number; y0: number; x1: number; y1: number };
+  boundingPolygon?: Array<{ x: number; y: number } | [number, number]>;
+  confidence?: ConfidenceLevel;
+  ambiguityNotes?: string;
+  rawText?: string;
+  householdName?: string;
+  householdId?: string;
   auditTrail?: AuditRecord;
 }
+
+// ExtractedRecord alias for backward compatibility with existing OCR utilities
+export type ExtractedRecord = LedgerEntry;
 
 export interface SourceDocument {
   id: string;
@@ -75,6 +115,7 @@ export interface SourceDocument {
   detectedPageTotal?: number;
   pageHeader?: string;
   qualityNotes?: string;
+  extractionEngine?: 'LOCAL_PADDLEOCR' | 'LOCAL_TESSERACT' | 'GEMINI_FALLBACK';
 }
 
 export interface DuplicateCandidate {
@@ -109,6 +150,7 @@ export interface LedgerSettings {
   currency: string;
   categories: string[];
   language: 'hi' | 'en';
+  aiAssistanceMode?: AIAssistanceMode;
 }
 
 export interface ExtractionAPIResponse {

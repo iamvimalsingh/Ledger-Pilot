@@ -10,37 +10,21 @@ import {
   FileText,
   ShieldCheck,
   RefreshCw,
-  Search,
   Eye,
   Zap,
+  Table,
+  ListOrdered,
+  Maximize2,
 } from 'lucide-react';
-import { createWorker } from 'tesseract.js';
-
-interface OCRBox {
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
-}
-
-interface OCRWord {
-  text: string;
-  confidence: number;
-  bbox: OCRBox;
-}
-
-interface OCRLine {
-  text: string;
-  confidence: number;
-  bbox: OCRBox;
-  words: OCRWord[];
-}
-
-interface PreprocessingOptions {
-  grayscale: boolean;
-  contrast: number; // 0 to 100
-  binarize: boolean;
-}
+import {
+  OCRLine,
+  OCRWord,
+  OCRBlock,
+  LocalOCRResult,
+  PreprocessingOptions,
+  preprocessImageLocally,
+  executeLocalOCR,
+} from '../utils/localOcr';
 
 export const LocalOCRTestLab: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -53,17 +37,11 @@ export const LocalOCRTestLab: React.FC = () => {
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [progress, setProgress] = useState<number>(0);
 
-  // Performance metrics
-  const [modelInitTimeMs, setModelInitTimeMs] = useState<number | null>(null);
-  const [firstInferenceTimeMs, setFirstInferenceTimeMs] = useState<number | null>(null);
-  const [totalInferenceTimeMs, setTotalInferenceTimeMs] = useState<number | null>(null);
-
-  // Results
-  const [rawText, setRawText] = useState<string>('');
-  const [lines, setLines] = useState<OCRLine[]>([]);
-  const [words, setWords] = useState<OCRWord[]>([]);
-  const [selectedRegion, setSelectedRegion] = useState<OCRLine | OCRWord | null>(null);
+  // Performance & Results
+  const [ocrResult, setOcrResult] = useState<LocalOCRResult | null>(null);
   const [showBoundingBoxes, setShowBoundingBoxes] = useState<boolean>(true);
+  const [viewMode, setViewMode] = useState<'raw' | 'structured' | 'tokens'>('raw');
+  const [selectedItem, setSelectedItem] = useState<OCRLine | OCRWord | null>(null);
 
   // Preprocessing
   const [options, setOptions] = useState<PreprocessingOptions>({
@@ -73,7 +51,6 @@ export const LocalOCRTestLab: React.FC = () => {
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageDisplayRef = useRef<HTMLImageElement>(null);
 
   // Handle file selection from browser
@@ -85,146 +62,39 @@ export const LocalOCRTestLab: React.FC = () => {
       setPreviewUrl(url);
       setProcessedImageUrl(url);
       // Reset previous OCR results
-      setRawText('');
-      setLines([]);
-      setWords([]);
+      setOcrResult(null);
+      setSelectedItem(null);
       setOcrEngineStatus('idle');
       setStatusMessage('');
       setProgress(0);
-      setModelInitTimeMs(null);
-      setFirstInferenceTimeMs(null);
-      setTotalInferenceTimeMs(null);
     }
   };
 
   // Client-side image canvas preprocessing
   useEffect(() => {
     if (!previewUrl) return;
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      ctx.drawImage(img, 0, 0);
-
-      if (options.grayscale || options.contrast > 0 || options.binarize) {
-        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imgData.data;
-        const contrastFactor = (259 * (options.contrast + 255)) / (255 * (259 - options.contrast));
-
-        for (let i = 0; i < data.length; i += 4) {
-          let r = data[i];
-          let g = data[i + 1];
-          let b = data[i + 2];
-
-          // Grayscale luminance
-          let gray = 0.299 * r + 0.587 * g + 0.114 * b;
-
-          // Contrast adjustment
-          if (options.contrast > 0) {
-            gray = contrastFactor * (gray - 128) + 128;
-            gray = Math.max(0, Math.min(255, gray));
-          }
-
-          // Simple threshold binarization
-          if (options.binarize) {
-            gray = gray > 140 ? 255 : 0;
-          }
-
-          data[i] = gray;
-          data[i + 1] = gray;
-          data[i + 2] = gray;
-        }
-        ctx.putImageData(imgData, 0, 0);
-      }
-
-      setProcessedImageUrl(canvas.toDataURL('image/png'));
-    };
-    img.src = previewUrl;
+    preprocessImageLocally(previewUrl, options).then((url) => {
+      setProcessedImageUrl(url);
+    });
   }, [previewUrl, options]);
 
   // Execute in-browser local OCR with zero network/Gemini calls
   const runLocalOCR = async () => {
-    if (!processedImageUrl && !selectedFile) return;
+    const targetSource = processedImageUrl || previewUrl || selectedFile;
+    if (!targetSource) return;
 
     setOcrEngineStatus('initializing');
     setStatusMessage('Initializing in-browser WASM OCR worker (Local inference)...');
     setProgress(5);
 
-    const initStart = performance.now();
-
     try {
-      // Create local WASM worker with Hindi + English support
-      const worker = await createWorker('hin+eng', 1, {
-        logger: (m) => {
-          if (m.status === 'recognizing text') {
-            setOcrEngineStatus('recognizing');
-            setStatusMessage(`Local recognition in progress: ${Math.round((m.progress || 0) * 100)}%`);
-            setProgress(Math.round((m.progress || 0) * 100));
-          } else {
-            setStatusMessage(`Engine: ${m.status}`);
-          }
-        },
+      const res = await executeLocalOCR(targetSource, (msg, pct) => {
+        setStatusMessage(msg);
+        setProgress(pct);
+        if (pct > 15) setOcrEngineStatus('recognizing');
       });
 
-      const initEnd = performance.now();
-      const initDuration = Math.round(initEnd - initStart);
-      setModelInitTimeMs(initDuration);
-
-      setOcrEngineStatus('recognizing');
-      setStatusMessage('Executing local neural character recognition on browser thread/worker...');
-
-      const inferenceStart = performance.now();
-      const imageSource = processedImageUrl || selectedFile;
-      const ret = await worker.recognize(imageSource as any);
-      const inferenceEnd = performance.now();
-
-      const inferenceDuration = Math.round(inferenceEnd - inferenceStart);
-      setFirstInferenceTimeMs(inferenceDuration);
-      setTotalInferenceTimeMs(initDuration + inferenceDuration);
-
-      // Extract raw data and geometry
-      setRawText(ret.data.text || '');
-
-      const extractedLines: OCRLine[] = [];
-      const extractedWords: OCRWord[] = [];
-
-      if (ret.data && (ret.data as any).lines) {
-        for (const l of (ret.data as any).lines) {
-          const lineObj: OCRLine = {
-            text: l.text?.trim() || '',
-            confidence: l.confidence || 0,
-            bbox: l.bbox || { x0: 0, y0: 0, x1: 0, y1: 0 },
-            words: [],
-          };
-
-          if (l.words) {
-            for (const w of l.words) {
-              const wordObj: OCRWord = {
-                text: w.text?.trim() || '',
-                confidence: w.confidence || 0,
-                bbox: w.bbox || { x0: 0, y0: 0, x1: 0, y1: 0 },
-              };
-              lineObj.words.push(wordObj);
-              extractedWords.push(wordObj);
-            }
-          }
-
-          if (lineObj.text) {
-            extractedLines.push(lineObj);
-          }
-        }
-      }
-
-      setLines(extractedLines);
-      setWords(extractedWords);
-
-      await worker.terminate();
-
+      setOcrResult(res);
       setOcrEngineStatus('completed');
       setStatusMessage('Local OCR inference completed successfully.');
       setProgress(100);
@@ -235,22 +105,12 @@ export const LocalOCRTestLab: React.FC = () => {
     }
   };
 
-  // Table & Region Heuristics (Local analysis without AI)
-  const amountCandidates = words.filter((w) => {
-    const clean = w.text.replace(/[₹,./\-]/g, '').trim();
-    return /^\d{2,7}$/.test(clean);
-  });
-
-  const devanagariWords = words.filter((w) => /[\u0900-\u097F]/.test(w.text));
-
-  // Estimate likely row groups based on vertical position alignment (y-coordinate clustering)
-  const rowGroupBuckets: { [bucketKey: number]: OCRLine[] } = {};
-  lines.forEach((l) => {
-    const centerY = Math.floor((l.bbox.y0 + l.bbox.y1) / 2 / 30) * 30; // 30px bucket
-    if (!rowGroupBuckets[centerY]) rowGroupBuckets[centerY] = [];
-    rowGroupBuckets[centerY].push(l);
-  });
-  const estimatedRowCount = Object.keys(rowGroupBuckets).length;
+  const blocks = ocrResult?.blocks || [];
+  const lines = ocrResult?.lines || [];
+  const words = ocrResult?.words || [];
+  const amountCandidates = ocrResult?.amountCandidates || [];
+  const devanagariWords = ocrResult?.devanagariWords || [];
+  const latinWords = ocrResult?.latinWords || [];
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
@@ -259,18 +119,18 @@ export const LocalOCRTestLab: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-500/20 text-amber-400 border border-amber-500/30">
-              Experimental Lab • Step 1
+              Diagnostic Lab • Step 1
             </span>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
               <ShieldCheck className="w-3.5 h-3.5" /> 100% In-Browser Local Inference
             </span>
           </div>
           <h1 className="text-xl font-black tracking-tight text-white mt-1.5 flex items-center gap-2">
-            <Cpu className="w-6 h-6 text-amber-400" /> Local OCR Feasibility Test (Zero Gemini Calls)
+            <Cpu className="w-6 h-6 text-amber-400" /> Local OCR Diagnostic & Parsing Lab
           </h1>
           <p className="text-xs text-stone-400 mt-1 max-w-2xl">
-            Directly test local WASM character & table recognition on real handwritten ledger images without
-            transmitting image bytes to the cloud or incurring API costs.
+            Inspect in-depth character tokens, bounding boxes, row alignment, and numeric candidates from Tesseract
+            WASM with zero Gemini API calls.
           </p>
         </div>
 
@@ -285,8 +145,8 @@ export const LocalOCRTestLab: React.FC = () => {
             <p className="text-lg font-black text-emerald-400">0</p>
           </div>
           <div className="text-center px-3">
-            <p className="text-[10px] uppercase font-bold text-stone-400">Engine Type</p>
-            <p className="text-xs font-bold text-amber-300">WASM / Local</p>
+            <p className="text-[10px] uppercase font-bold text-stone-400">Engine</p>
+            <p className="text-xs font-bold text-amber-300">WASM hin+eng</p>
           </div>
         </div>
       </div>
@@ -347,7 +207,7 @@ export const LocalOCRTestLab: React.FC = () => {
                     <label className="flex items-center gap-1.5 cursor-pointer font-medium text-stone-700">
                       <input
                         type="checkbox"
-                        checked={options.grayscale}
+                        checked={options.grayscale || false}
                         onChange={(e) => setOptions({ ...options, grayscale: e.target.checked })}
                         className="rounded text-amber-600 focus:ring-amber-500"
                       />
@@ -357,7 +217,7 @@ export const LocalOCRTestLab: React.FC = () => {
                     <label className="flex items-center gap-1.5 cursor-pointer font-medium text-stone-700">
                       <input
                         type="checkbox"
-                        checked={options.binarize}
+                        checked={options.binarize || false}
                         onChange={(e) => setOptions({ ...options, binarize: e.target.checked })}
                         className="rounded text-amber-600 focus:ring-amber-500"
                       />
@@ -370,11 +230,11 @@ export const LocalOCRTestLab: React.FC = () => {
                         type="range"
                         min="0"
                         max="100"
-                        value={options.contrast}
+                        value={options.contrast || 0}
                         onChange={(e) => setOptions({ ...options, contrast: Number(e.target.value) })}
                         className="w-20 accent-amber-600"
                       />
-                      <span className="text-[10px] text-stone-500">{options.contrast}%</span>
+                      <span className="text-[10px] text-stone-500">{options.contrast || 0}%</span>
                     </label>
                   </div>
 
@@ -399,12 +259,12 @@ export const LocalOCRTestLab: React.FC = () => {
                 </div>
 
                 {/* Image Preview with Bounding Box Overlay */}
-                <div className="relative border border-stone-200 rounded-xl overflow-hidden bg-stone-100 max-h-[600px] flex items-center justify-center">
+                <div className="relative border border-stone-200 rounded-xl overflow-hidden bg-stone-100 max-h-[550px] flex items-center justify-center">
                   <img
                     ref={imageDisplayRef}
                     src={processedImageUrl || previewUrl}
                     alt="Ledger Page"
-                    className="max-h-[600px] w-auto object-contain select-none"
+                    className="max-h-[550px] w-auto object-contain select-none"
                   />
 
                   {/* Bounding box overlays */}
@@ -415,28 +275,32 @@ export const LocalOCRTestLab: React.FC = () => {
                         imageDisplayRef.current.naturalHeight || 1000
                       }`}
                     >
-                      {lines.map((l, idx) => (
-                        <g key={idx}>
-                          <rect
-                            x={l.bbox.x0}
-                            y={l.bbox.y0}
-                            width={l.bbox.x1 - l.bbox.x0}
-                            height={l.bbox.y1 - l.bbox.y0}
-                            fill="rgba(245, 158, 11, 0.15)"
-                            stroke="rgba(217, 119, 6, 0.8)"
-                            strokeWidth="1.5"
-                          />
-                          <text
-                            x={l.bbox.x0}
-                            y={Math.max(12, l.bbox.y0 - 4)}
-                            fontSize="10"
-                            fill="#b45309"
-                            fontWeight="bold"
-                          >
-                            #{idx + 1} ({Math.round(l.confidence)}%)
-                          </text>
-                        </g>
-                      ))}
+                      {lines.map((l, idx) => {
+                        if (!l.bbox) return null;
+                        const isSelected = selectedItem === l;
+                        return (
+                          <g key={idx}>
+                            <rect
+                              x={l.bbox.x0}
+                              y={l.bbox.y0}
+                              width={Math.max(1, l.bbox.x1 - l.bbox.x0)}
+                              height={Math.max(1, l.bbox.y1 - l.bbox.y0)}
+                              fill={isSelected ? 'rgba(239, 68, 68, 0.25)' : 'rgba(245, 158, 11, 0.15)'}
+                              stroke={isSelected ? 'rgba(220, 38, 38, 0.9)' : 'rgba(217, 119, 6, 0.8)'}
+                              strokeWidth={isSelected ? '2.5' : '1.5'}
+                            />
+                            <text
+                              x={l.bbox.x0}
+                              y={Math.max(12, l.bbox.y0 - 4)}
+                              fontSize="10"
+                              fill={isSelected ? '#991b1b' : '#b45309'}
+                              fontWeight="bold"
+                            >
+                              #{idx + 1} ({Math.round(l.confidence)}%)
+                            </text>
+                          </g>
+                        );
+                      })}
                     </svg>
                   )}
                 </div>
@@ -476,19 +340,19 @@ export const LocalOCRTestLab: React.FC = () => {
               <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-200/60">
                 <p className="text-[10px] text-stone-500 font-bold uppercase">Model Init</p>
                 <p className="text-sm font-black text-stone-900">
-                  {modelInitTimeMs !== null ? `${modelInitTimeMs}ms` : '—'}
+                  {ocrResult?.modelInitTimeMs !== undefined ? `${ocrResult.modelInitTimeMs}ms` : '—'}
                 </p>
               </div>
               <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-200/60">
                 <p className="text-[10px] text-stone-500 font-bold uppercase">Inference</p>
                 <p className="text-sm font-black text-stone-900">
-                  {firstInferenceTimeMs !== null ? `${firstInferenceTimeMs}ms` : '—'}
+                  {ocrResult?.firstInferenceTimeMs !== undefined ? `${ocrResult.firstInferenceTimeMs}ms` : '—'}
                 </p>
               </div>
               <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-200/60">
                 <p className="text-[10px] text-stone-500 font-bold uppercase">Total Time</p>
                 <p className="text-sm font-black text-blue-600">
-                  {totalInferenceTimeMs !== null ? `${totalInferenceTimeMs}ms` : '—'}
+                  {ocrResult?.totalInferenceTimeMs !== undefined ? `${ocrResult.totalInferenceTimeMs}ms` : '—'}
                 </p>
               </div>
             </div>
@@ -508,25 +372,52 @@ export const LocalOCRTestLab: React.FC = () => {
           {/* Table Heuristics / Semantic Candidates */}
           <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs space-y-3">
             <h2 className="text-sm font-bold text-stone-900 flex items-center gap-2">
-              <Layers className="w-4 h-4 text-purple-600" /> 3. Structural Table Analysis (Local)
+              <Layers className="w-4 h-4 text-purple-600" /> 3. Structural Metrics (Parsed from Tesseract)
             </h2>
 
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100">
-                <p className="text-stone-500 font-medium">Detected Text Lines</p>
-                <p className="text-lg font-bold text-purple-900">{lines.length}</p>
+                <p className="text-stone-500 font-medium">Detected Blocks</p>
+                <p className="text-base font-bold text-purple-900">
+                  {ocrResult ? blocks.length : 'Unavailable from current OCR output'}
+                </p>
               </div>
+
+              <div className="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100">
+                <p className="text-stone-500 font-medium">Detected Lines</p>
+                <p className="text-base font-bold text-purple-900">
+                  {ocrResult ? lines.length : 'Unavailable from current OCR output'}
+                </p>
+              </div>
+
+              <div className="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100">
+                <p className="text-stone-500 font-medium">Detected Words</p>
+                <p className="text-base font-bold text-purple-900">
+                  {ocrResult ? words.length : 'Unavailable from current OCR output'}
+                </p>
+              </div>
+
               <div className="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100">
                 <p className="text-stone-500 font-medium">Estimated Row Groups</p>
-                <p className="text-lg font-bold text-purple-900">{estimatedRowCount}</p>
+                <p className="text-base font-bold text-purple-900">
+                  {ocrResult?.estimatedRowCount !== null && ocrResult?.estimatedRowCount !== undefined
+                    ? `${ocrResult.estimatedRowCount} groups`
+                    : 'Unavailable (bounding coordinates missing)'}
+                </p>
               </div>
+
               <div className="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100">
                 <p className="text-stone-500 font-medium">Amount Candidates</p>
-                <p className="text-lg font-bold text-purple-900">{amountCandidates.length}</p>
+                <p className="text-base font-bold text-purple-900">
+                  {ocrResult ? amountCandidates.length : 'Unavailable from current OCR output'}
+                </p>
               </div>
+
               <div className="bg-purple-50/60 p-2.5 rounded-xl border border-purple-100">
-                <p className="text-stone-500 font-medium">Hindi / Devanagari Regions</p>
-                <p className="text-lg font-bold text-purple-900">{devanagariWords.length}</p>
+                <p className="text-stone-500 font-medium">Hindi/Devanagari Words</p>
+                <p className="text-base font-bold text-purple-900">
+                  {ocrResult ? devanagariWords.length : 'Unavailable from current OCR output'}
+                </p>
               </div>
             </div>
 
@@ -534,7 +425,7 @@ export const LocalOCRTestLab: React.FC = () => {
             {amountCandidates.length > 0 && (
               <div className="pt-2 border-t border-stone-100">
                 <p className="text-[11px] font-bold text-stone-700 uppercase mb-1.5">
-                  Detected Numeric Candidates:
+                  Actual Numeric Candidates Found ({amountCandidates.length}):
                 </p>
                 <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
                   {amountCandidates.map((c, i) => (
@@ -550,22 +441,131 @@ export const LocalOCRTestLab: React.FC = () => {
             )}
           </div>
 
-          {/* Raw OCR Text Output */}
+          {/* OCR Result View (Toggle Raw vs Structured Regions) */}
           <div className="bg-white p-5 rounded-2xl border border-stone-200 shadow-xs space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-bold text-stone-900 flex items-center gap-2">
-                <FileText className="w-4 h-4 text-stone-700" /> 4. Raw OCR Text Output
+                <FileText className="w-4 h-4 text-stone-700" /> 4. OCR Output Inspection
               </h2>
-              <span className="text-[11px] text-stone-500 font-medium">{words.length} tokens</span>
+              <div className="flex items-center gap-1 bg-stone-100 p-0.5 rounded-lg text-xs">
+                <button
+                  onClick={() => setViewMode('raw')}
+                  className={`px-2 py-1 rounded-md font-medium transition ${
+                    viewMode === 'raw' ? 'bg-white font-bold shadow-2xs text-stone-900' : 'text-stone-600'
+                  }`}
+                >
+                  Raw Text
+                </button>
+                <button
+                  onClick={() => setViewMode('structured')}
+                  className={`px-2 py-1 rounded-md font-medium transition ${
+                    viewMode === 'structured'
+                      ? 'bg-white font-bold shadow-2xs text-stone-900'
+                      : 'text-stone-600'
+                  }`}
+                >
+                  Lines ({lines.length})
+                </button>
+                <button
+                  onClick={() => setViewMode('tokens')}
+                  className={`px-2 py-1 rounded-md font-medium transition ${
+                    viewMode === 'tokens'
+                      ? 'bg-white font-bold shadow-2xs text-stone-900'
+                      : 'text-stone-600'
+                  }`}
+                >
+                  Tokens ({words.length})
+                </button>
+              </div>
             </div>
 
-            <div className="bg-stone-900 text-stone-100 font-mono text-xs p-3.5 rounded-xl max-h-64 overflow-y-auto whitespace-pre-wrap leading-relaxed border border-stone-800">
-              {rawText || (
-                <span className="text-stone-500 italic">
-                  Upload an image and click "Run Local OCR" to view raw extracted text...
-                </span>
-              )}
-            </div>
+            {/* View Mode: RAW TEXT */}
+            {viewMode === 'raw' && (
+              <div className="bg-stone-900 text-stone-100 font-mono text-xs p-3.5 rounded-xl max-h-64 overflow-y-auto whitespace-pre-wrap leading-relaxed border border-stone-800">
+                {ocrResult?.rawText || (
+                  <span className="text-stone-500 italic">
+                    Upload an image and click "Run Local OCR" to view raw extracted text...
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* View Mode: STRUCTURED LINES & BOUNDING BOX DATA */}
+            {viewMode === 'structured' && (
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {lines.length === 0 ? (
+                  <p className="text-xs text-stone-500 italic p-3 text-center">
+                    No structured lines available yet.
+                  </p>
+                ) : (
+                  lines.map((l, idx) => {
+                    const isSelected = selectedItem === l;
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => setSelectedItem(l)}
+                        className={`p-2 rounded-lg border text-xs cursor-pointer transition ${
+                          isSelected
+                            ? 'bg-amber-50 border-amber-400'
+                            : 'bg-stone-50 hover:bg-stone-100 border-stone-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between font-mono font-bold text-stone-900 mb-1">
+                          <span className="text-amber-800">Line #{idx + 1}</span>
+                          <span className="text-stone-500 text-[10px]">
+                            Conf: {Math.round(l.confidence)}%
+                          </span>
+                        </div>
+                        <p className="font-sans text-stone-800 font-medium">{l.text}</p>
+                        {l.bbox && (
+                          <p className="text-[10px] text-stone-500 font-mono mt-1">
+                            bbox: x={l.bbox.x0}, y={l.bbox.y0}, w={l.bbox.x1 - l.bbox.x0}, h=
+                            {l.bbox.y1 - l.bbox.y0}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+
+            {/* View Mode: TOKEN CHUNKS */}
+            {viewMode === 'tokens' && (
+              <div className="flex flex-wrap gap-1.5 max-h-64 overflow-y-auto p-1">
+                {words.length === 0 ? (
+                  <p className="text-xs text-stone-500 italic p-3 text-center">
+                    No tokens available yet.
+                  </p>
+                ) : (
+                  words.map((w, idx) => {
+                    const isDevanagari = /[\u0900-\u097F]/.test(w.text);
+                    const isNumeric = /^\d+$/.test(w.text.replace(/[₹,./\-]/g, ''));
+                    return (
+                      <span
+                        key={idx}
+                        title={`Conf: ${Math.round(w.confidence)}% ${
+                          w.bbox
+                            ? `(x:${w.bbox.x0}, y:${w.bbox.y0}, w:${w.bbox.x1 - w.bbox.x0}, h:${
+                                w.bbox.y1 - w.bbox.y0
+                              })`
+                            : ''
+                        }`}
+                        className={`px-2 py-0.5 rounded text-xs font-medium border ${
+                          isNumeric
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-mono font-bold'
+                            : isDevanagari
+                            ? 'bg-amber-50 text-amber-900 border-amber-300'
+                            : 'bg-stone-50 text-stone-800 border-stone-200 font-mono'
+                        }`}
+                      >
+                        {w.text} <span className="text-[9px] text-stone-400">({Math.round(w.confidence)}%)</span>
+                      </span>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

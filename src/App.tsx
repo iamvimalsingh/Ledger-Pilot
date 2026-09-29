@@ -2,54 +2,52 @@ import React, { useState, useEffect } from 'react';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import { Dashboard } from './components/Dashboard';
+import { VerifiedLedger } from './components/VerifiedLedger';
+import { ReportsView } from './components/ReportsView';
 import { UploadCapture } from './components/UploadCapture';
 import { ExtractionReview } from './components/ExtractionReview';
-import { VerifiedLedger } from './components/VerifiedLedger';
-import { ReconciliationSummary } from './components/ReconciliationSummary';
-import { HouseholdManager } from './components/HouseholdManager';
-import { ReportsView } from './components/ReportsView';
-import { SourceImageViewer } from './components/SourceImageViewer';
-import { DuplicateReviewModal } from './components/DuplicateReviewModal';
-import { SettingsModal } from './components/SettingsModal';
-import { AuditHistoryModal } from './components/AuditHistoryModal';
-import { PrintView } from './components/PrintView';
+import { WelcomeOnboarding } from './components/WelcomeOnboarding';
+import { QuickEntryModal } from './components/QuickEntryModal';
 import { CreateProjectModal } from './components/CreateProjectModal';
-import { ExceptionInbox } from './components/ExceptionInbox';
-import { LocalOCRTestLab } from './components/LocalOCRTestLab';
+import { SettingsModal } from './components/SettingsModal';
+import { PrintView } from './components/PrintView';
+import { FloatingActionButton } from './components/FloatingActionButton';
+import { SourceImageViewer } from './components/SourceImageViewer';
+import { AuditHistoryModal } from './components/AuditHistoryModal';
 
 import {
-  ExtractedRecord,
+  LedgerProject,
+  LedgerEntry,
   SourceDocument,
   DuplicateCandidate,
-  Household,
   LedgerSettings,
-  ProjectMetadata,
+  ProjectType,
+  AIBudgetStats,
 } from './types/ledger';
 
 import {
-  INITIAL_SAMPLE_DOCS,
-  INITIAL_SAMPLE_RECORDS,
-  SAMPLE_HOUSEHOLDS,
-  DEMO_PROJECT_METADATA,
-} from './utils/sampleData';
+  getProjects,
+  saveProject,
+  deleteProject,
+  getEntries,
+  saveEntry,
+  saveEntries,
+  deleteEntry,
+  getAppMeta,
+  setAppMeta,
+  clearAllData,
+  migrateFromLocalStorage,
+  getAllDocumentImages,
+  saveDocumentImage,
+} from './utils/indexedDb';
 
 import { detectDuplicates } from './utils/duplicates';
-import {
-  saveDocumentImage,
-  getAllDocumentImages,
-  clearAllDocuments,
-} from './utils/indexedDb';
-import { migrateRecordTransactionType } from './utils/reconciliation';
-import { getLedgerExceptions } from './utils/exceptions';
-
-const STORAGE_KEY_RECORDS = 'ledgerpilot_records_v1';
-const STORAGE_KEY_HOUSEHOLDS = 'ledgerpilot_households_v1';
-const STORAGE_KEY_SETTINGS = 'ledgerpilot_settings_v1';
-const STORAGE_KEY_PROJECT = 'ledgerpilot_project_metadata_v1';
+import { extractLocalCandidatesFromImage } from './utils/localCandidateExtractor';
+import { runGeminiBatchAssist } from './utils/geminiAssist';
+import { INITIAL_SAMPLE_DOCS, INITIAL_SAMPLE_RECORDS } from './utils/sampleData';
 
 const DEFAULT_CATEGORIES = [
   'Donation',
-  'Contribution',
   'Member Fee',
   'Expense',
   'Maintenance',
@@ -57,163 +55,110 @@ const DEFAULT_CATEGORIES = [
   'Other',
 ];
 
-const DEFAULT_PROJECT_METADATA: ProjectMetadata = {
-  id: 'proj-default',
-  name: 'New Ledger',
-  description: 'Default financial ledger',
-  createdAt: 1724544000000,
-};
-
 export function App() {
+  // Application Loading & Project State
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [projects, setProjects] = useState<LedgerProject[]>([]);
+  const [activeProject, setActiveProject] = useState<LedgerProject | null>(null);
+  const [entries, setEntries] = useState<LedgerEntry[]>([]);
+  const [documents, setDocuments] = useState<SourceDocument[]>([]);
+  const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([]);
+
   // Navigation State
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
 
-  // Core Data State with safe backward-compatibility migration
-  const [records, setRecords] = useState<ExtractedRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_RECORDS);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.map(migrateRecordTransactionType);
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return INITIAL_SAMPLE_RECORDS;
-  });
-
-  const [documents, setDocuments] = useState<SourceDocument[]>(INITIAL_SAMPLE_DOCS);
-
-  const [households, setHouseholds] = useState<Household[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_HOUSEHOLDS);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error(e);
-    }
-    return SAMPLE_HOUSEHOLDS;
-  });
-
-  const [activeProject, setActiveProject] = useState<ProjectMetadata>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_PROJECT);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && parsed.name && parsed.name !== 'श्री गणेश उत्सव - वसंत विहार') {
-          return parsed;
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return DEFAULT_PROJECT_METADATA;
-  });
-
-  const [settings, setSettings] = useState<LedgerSettings>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_SETTINGS);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Sanitize legacy festival string to clean neutral default
-        if (
-          parsed.eventOrColony === 'श्री गणेश उत्सव - वसंत विहार' ||
-          (parsed.projectName === 'LedgerPilot' && parsed.eventOrColony === 'श्री गणेश उत्सव - वसंत विहार')
-        ) {
-          parsed.projectName = 'New Ledger';
-          parsed.eventOrColony = 'New Ledger';
-        }
-        if (parsed.categories && parsed.categories.includes('General Chanda')) {
-          parsed.categories = DEFAULT_CATEGORIES;
-        }
-        return parsed;
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return {
-      projectName: 'New Ledger',
-      eventOrColony: 'New Ledger',
-      currency: 'INR',
-      categories: DEFAULT_CATEGORIES,
-      language: 'hi',
-    };
-  });
-
-  // Duplicates State
-  const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([]);
-
-  // Modals & Overlays
-  const [viewerDocId, setViewerDocId] = useState<string | null>(null);
-  const [highlightRecordId, setHighlightRecordId] = useState<string | null>(null);
-  const [auditRecord, setAuditRecord] = useState<ExtractedRecord | null>(null);
+  // Modals
+  const [isQuickEntryOpen, setIsQuickEntryOpen] = useState<boolean>(false);
+  const [isCreateProjectOpen, setIsCreateProjectOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isPrintOpen, setIsPrintOpen] = useState<boolean>(false);
-  const [isCreateProjectOpen, setIsCreateProjectOpen] = useState<boolean>(false);
-  const [isExtracting, setIsExtracting] = useState<boolean>(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [viewerDocId, setViewerDocId] = useState<string | null>(null);
+  const [auditRecord, setAuditRecord] = useState<LedgerEntry | null>(null);
 
-  // Show Toast
+  // Settings
+  const [settings, setSettings] = useState<LedgerSettings>({
+    projectName: 'My Ledger',
+    eventOrColony: 'My Ledger',
+    currency: 'INR',
+    categories: DEFAULT_CATEGORIES,
+    language: 'hi',
+  });
+
+  // Extraction State (Optional secondary Scan tool)
+  const [isExtracting, setIsExtracting] = useState<boolean>(false);
+  const [aiBudgetStats, setAiBudgetStats] = useState<AIBudgetStats>({
+    pagesProcessed: 0,
+    totalRows: 0,
+    localOnlyRows: 0,
+    aiAssistedRows: 0,
+    geminiRequests: 0,
+  });
+
+  // Toast
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Load documents from IndexedDB on startup
+  // 1. Initial Load & Migration
   useEffect(() => {
-    async function loadDocs() {
+    async function initApp() {
       try {
+        // Attempt migration of real user data if present in localStorage
+        const migrated = await migrateFromLocalStorage();
+
+        // Load existing projects from IndexedDB
+        let allProjects = await getProjects();
+
+        if (allProjects.length === 0 && migrated && migrated.projects.length > 0) {
+          allProjects = migrated.projects;
+        }
+
+        setProjects(allProjects);
+
+        if (allProjects.length > 0) {
+          // Find previously active project or default to first
+          const savedActiveId = await getAppMeta<string>('activeProjectId');
+          const matched = allProjects.find((p) => p.id === savedActiveId) || allProjects[0];
+          setActiveProject(matched);
+
+          setSettings((prev) => ({
+            ...prev,
+            projectName: matched.name,
+            categories: matched.categories || DEFAULT_CATEGORIES,
+            currency: matched.currency || 'INR',
+          }));
+
+          // Load entries for this active project
+          const projEntries = await getEntries(matched.id);
+          setEntries(projEntries);
+        } else {
+          setActiveProject(null);
+          setEntries([]);
+        }
+
+        // Load any stored documents
         const idbDocs = await getAllDocumentImages();
         if (idbDocs && idbDocs.length > 0) {
           setDocuments(idbDocs);
-        } else {
-          // Initialize sample doc into IndexedDB
-          for (const doc of INITIAL_SAMPLE_DOCS) {
-            await saveDocumentImage(doc);
-          }
         }
       } catch (err) {
-        console.error('Error loading documents from IndexedDB:', err);
+        console.error('Initialization error:', err);
+      } finally {
+        setIsLoading(false);
       }
     }
-    loadDocs();
+
+    initApp();
   }, []);
 
-  // Save records & households to localStorage
+  // 2. Detect Duplicates when entries change
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(records));
-    } catch (e) {
-      console.error('Failed to save records to localStorage:', e);
-    }
-  }, [records]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_HOUSEHOLDS, JSON.stringify(households));
-    } catch (e) {
-      console.error('Failed to save households to localStorage:', e);
-    }
-  }, [households]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
-    } catch (e) {
-      console.error('Failed to save settings to localStorage:', e);
-    }
-  }, [settings]);
-
-  // Recalculate Duplicates when records change
-  useEffect(() => {
-    const unverified = records.filter((r) => !r.verified);
-    const verified = records.filter((r) => r.verified);
-
-    // Also detect internal duplicates within unverified batch
+    const unverified = entries.filter((r) => !r.verified);
+    const verified = entries.filter((r) => r.verified);
     const foundDuplicates = detectDuplicates(unverified, verified);
 
-    // Maintain resolved statuses
     setDuplicates((prevDups) => {
       const resolvedMap = new Map(prevDups.map((d) => [d.id, d.status]));
       return foundDuplicates.map((dup) => ({
@@ -221,457 +166,459 @@ export function App() {
         status: resolvedMap.get(dup.id) || 'pending',
       }));
     });
-  }, [records]);
+  }, [entries]);
 
-  // Handle Gemini Extraction
-  const handleStartExtraction = async (
-    items: Array<{ previewUrl: string; fileName: string; pageNumber: number }>
+  // Project Actions
+  const handleCreateProject = async (
+    name: string,
+    initialCategories: string[],
+    type: ProjectType = 'general'
   ) => {
+    const newProj: LedgerProject = {
+      id: 'proj-' + Date.now(),
+      name: name.trim(),
+      type,
+      currency: 'INR',
+      categories: initialCategories,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    await saveProject(newProj);
+    await setAppMeta('activeProjectId', newProj.id);
+
+    setProjects((prev) => [...prev, newProj]);
+    setActiveProject(newProj);
+    setEntries([]);
+    setSettings((prev) => ({
+      ...prev,
+      projectName: newProj.name,
+      categories: newProj.categories,
+    }));
+
+    setCurrentTab('dashboard');
+    showToast(
+      settings.language === 'hi'
+        ? `बहीखाता "${newProj.name}" तैयार है!`
+        : `Ledger "${newProj.name}" created!`
+    );
+  };
+
+  const handleSelectProject = async (projectId: string) => {
+    const target = projects.find((p) => p.id === projectId);
+    if (!target) return;
+
+    setActiveProject(target);
+    await setAppMeta('activeProjectId', target.id);
+
+    setSettings((prev) => ({
+      ...prev,
+      projectName: target.name,
+      categories: target.categories || DEFAULT_CATEGORIES,
+      currency: target.currency || 'INR',
+    }));
+
+    const projEntries = await getEntries(target.id);
+    setEntries(projEntries);
+    showToast(target.name);
+  };
+
+  const handleUpdateProjectName = async (newName: string) => {
+    if (!activeProject) return;
+    const updated: LedgerProject = {
+      ...activeProject,
+      name: newName,
+      updatedAt: Date.now(),
+    };
+    await saveProject(updated);
+    setActiveProject(updated);
+    setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    setSettings((prev) => ({ ...prev, projectName: newName }));
+  };
+
+  // Entry Actions (Deterministic & Local-First)
+  const handleSaveQuickEntry = async (
+    entryData: Omit<LedgerEntry, 'id' | 'createdAt' | 'updatedAt'>,
+    addAnother: boolean
+  ) => {
+    if (!activeProject) return;
+
+    // Deterministic auto-serial number calculation
+    const existingSerials = entries.map((e) => e.serialNumber || 0);
+    const maxSerial = existingSerials.length > 0 ? Math.max(...existingSerials) : 0;
+    const nextSerial = maxSerial + 1;
+
+    const newEntry: LedgerEntry = {
+      ...entryData,
+      id: `entry-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      projectId: activeProject.id,
+      serialNumber: nextSerial,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      verified: true, // Manual entries are verified by default
+      source: 'MANUAL',
+    };
+
+    await saveEntry(newEntry);
+    setEntries((prev) => [...prev, newEntry]);
+
+    showToast(
+      settings.language === 'hi'
+        ? `✓ हिसाब #${nextSerial} सहेज लिया गया`
+        : `✓ Entry #${nextSerial} saved`
+    );
+
+    if (!addAnother) {
+      setIsQuickEntryOpen(false);
+    }
+  };
+
+  const handleUpdateRecord = async (
+    id: string,
+    updated: Partial<LedgerEntry>,
+    reason: string = 'User manual edit'
+  ) => {
+    const existing = entries.find((e) => e.id === id);
+    if (!existing) return;
+
+    const updatedEntry: LedgerEntry = {
+      ...existing,
+      ...updated,
+      updatedAt: Date.now(),
+      auditTrail: {
+        originalAIValue: existing.auditTrail?.originalAIValue || {
+          name: existing.name,
+          amount: existing.amount,
+          transactionType: existing.transactionType,
+          paymentMode: existing.paymentMode,
+          category: existing.category,
+        },
+        userCorrectedValue: {
+          name: updated.name || existing.name,
+          amount: updated.amount !== undefined ? updated.amount : existing.amount,
+          transactionType: updated.transactionType || existing.transactionType,
+          paymentMode: updated.paymentMode || existing.paymentMode,
+          category: updated.category || existing.category,
+        },
+        correctedAt: Date.now(),
+        correctedReason: reason,
+      },
+    };
+
+    await saveEntry(updatedEntry);
+    setEntries((prev) => prev.map((e) => (e.id === id ? updatedEntry : e)));
+    showToast(settings.language === 'hi' ? 'परिवर्तन सहेज लिए गए' : 'Record updated');
+  };
+
+  const handleDeleteRecord = async (id: string) => {
+    await deleteEntry(id);
+    setEntries((prev) => prev.filter((e) => e.id !== id));
+    showToast(settings.language === 'hi' ? 'हिसाब हटा दिया गया' : 'Record deleted');
+  };
+
+  // Backup & Restore
+  const handleExportBackup = async () => {
+    const allProjects = await getProjects();
+    const allEntries = await getEntries();
+
+    const backupData = {
+      app: 'LedgerPilot',
+      version: 2,
+      exportedAt: Date.now(),
+      projects: allProjects,
+      entries: allEntries,
+      settings,
+    };
+
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `LedgerPilot_Backup_${(activeProject?.name || 'Ledger').replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showToast(settings.language === 'hi' ? 'बैकअप डाउनलोड हुआ' : 'Backup downloaded');
+  };
+
+  const handleRestoreBackupFile = async (file: File, mode: 'replace' | 'import_new') => {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+
+      if (mode === 'replace') {
+        await clearAllData();
+
+        if (parsed.version === 2 && Array.isArray(parsed.projects)) {
+          for (const p of parsed.projects) {
+            await saveProject(p);
+          }
+          if (Array.isArray(parsed.entries)) {
+            await saveEntries(parsed.entries);
+          }
+
+          setProjects(parsed.projects);
+          const firstProj = parsed.projects[0];
+          setActiveProject(firstProj || null);
+          if (firstProj) {
+            const e = await getEntries(firstProj.id);
+            setEntries(e);
+          } else {
+            setEntries([]);
+          }
+        } else if (Array.isArray(parsed.records)) {
+          // v1 legacy restore
+          const pId = 'proj-restored-' + Date.now();
+          const restoredProj: LedgerProject = {
+            id: pId,
+            name: parsed.settings?.projectName || 'Restored Ledger',
+            type: 'general',
+            currency: 'INR',
+            categories: parsed.settings?.categories || DEFAULT_CATEGORIES,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+          await saveProject(restoredProj);
+
+          const restoredEntries: LedgerEntry[] = parsed.records.map((r: any, idx: number) => ({
+            ...r,
+            id: r.id || `entry-r-${idx}`,
+            projectId: pId,
+            serialNumber: idx + 1,
+            source: 'IMPORT',
+            verified: true,
+          }));
+
+          await saveEntries(restoredEntries);
+          setProjects([restoredProj]);
+          setActiveProject(restoredProj);
+          setEntries(restoredEntries);
+        }
+
+        showToast(
+          settings.language === 'hi'
+            ? 'बैकअप सफलता से बहाल किया गया!'
+            : 'Backup restored successfully!'
+        );
+      } else {
+        // mode === 'import_new'
+        const importPrefix = 'imp-' + Date.now() + '-';
+
+        if (parsed.version === 2 && Array.isArray(parsed.projects)) {
+          for (const p of parsed.projects) {
+            const newId = importPrefix + p.id;
+            const newProj = { ...p, id: newId, name: `${p.name} (Imported)` };
+            await saveProject(newProj);
+
+            // Import corresponding entries
+            const pEntries = (parsed.entries || []).filter((e: any) => e.projectId === p.id);
+            const remappedEntries = pEntries.map((e: any) => ({
+              ...e,
+              id: importPrefix + e.id,
+              projectId: newId,
+            }));
+            await saveEntries(remappedEntries);
+          }
+
+          const reloadedProjects = await getProjects();
+          setProjects(reloadedProjects);
+          const imported = reloadedProjects[reloadedProjects.length - 1];
+          setActiveProject(imported);
+          const e = await getEntries(imported.id);
+          setEntries(e);
+        }
+
+        showToast(
+          settings.language === 'hi'
+            ? 'खाता नए रूप में सफलतापूर्वक आयात हुआ!'
+            : 'Imported as new ledger successfully!'
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      showToast(
+        settings.language === 'hi'
+          ? 'अमान्य बैकअप फ़ाइल'
+          : 'Invalid backup file format'
+      );
+    }
+  };
+
+  // Optional Demo Loader for Testing/Preview
+  const handleLoadDemoData = async () => {
+    const demoId = 'proj-demo-' + Date.now();
+    const demoProj: LedgerProject = {
+      id: demoId,
+      name: 'श्री गणेश उत्सव (Demo)',
+      type: 'society',
+      currency: 'INR',
+      categories: ['General Chanda', 'Bhandara', 'Sunderkand', 'Expense', 'Maintenance'],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    await saveProject(demoProj);
+    await setAppMeta('activeProjectId', demoId);
+
+    const demoEntries: LedgerEntry[] = INITIAL_SAMPLE_RECORDS.map((r, idx) => ({
+      ...r,
+      projectId: demoId,
+      serialNumber: idx + 1,
+      source: 'MANUAL',
+      verified: true,
+    }));
+
+    await saveEntries(demoEntries);
+
+    setProjects((prev) => [...prev, demoProj]);
+    setActiveProject(demoProj);
+    setEntries(demoEntries);
+    setSettings((prev) => ({
+      ...prev,
+      projectName: demoProj.name,
+      categories: demoProj.categories,
+    }));
+
+    setCurrentTab('dashboard');
+    showToast(
+      settings.language === 'hi'
+        ? '💡 नमूना डेमो डेटा लोड कर दिया गया है'
+        : 'Demo ledger loaded'
+    );
+  };
+
+  const handleResetAllData = async () => {
+    await clearAllData();
+    setProjects([]);
+    setActiveProject(null);
+    setEntries([]);
+    setDocuments([]);
+    setCurrentTab('dashboard');
+    showToast(settings.language === 'hi' ? 'सारा डेटा हटा दिया गया' : 'All data reset');
+  };
+
+  // Optional Local-First OCR Extraction (Under Scan Tab)
+  const handleStartLocalExtraction = async (
+    items: Array<{ previewUrl: string; fileName: string; pageNumber: number; file?: File }>
+  ) => {
+    if (!activeProject) return;
     setIsExtracting(true);
 
     let extractedCount = 0;
-    const newRecordsBatch: ExtractedRecord[] = [];
+    const newRecordsBatch: LedgerEntry[] = [];
     const newDocsBatch: SourceDocument[] = [];
-    const failedErrors: string[] = [];
+
+    const existingSerials = entries.map((e) => e.serialNumber || 0);
+    let currentSerial = existingSerials.length > 0 ? Math.max(...existingSerials) : 0;
 
     for (const item of items) {
       const docId = `doc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
       try {
-        const response = await fetch('/api/extract-ledger', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            image: item.previewUrl,
-            pageNumber: item.pageNumber,
-            projectName: settings.projectName,
-            categories: settings.categories,
-            existingHouseholds: households.map((h) => h.name),
-          }),
+        const imageSource = item.file || item.previewUrl;
+        const localResult = await extractLocalCandidatesFromImage(imageSource, {
+          pageNumber: item.pageNumber,
+          docId,
+          currency: settings.currency,
+          existingCategories: settings.categories,
         });
 
-        if (!response.ok) {
-          let errorMsg = `Server returned status ${response.status}`;
-          try {
-            const errData = await response.json();
-            if (errData && errData.error) errorMsg = errData.error;
-          } catch {
-            // response was not JSON
-          }
-          throw new Error(errorMsg);
+        const newDoc: SourceDocument = {
+          id: docId,
+          fileName: item.fileName,
+          dataUrl: item.previewUrl,
+          pageNumber: item.pageNumber,
+          uploadedAt: Date.now(),
+          recordCount: localResult.records.length,
+          detectedPageTotal: localResult.detectedPageTotal,
+          pageHeader: localResult.pageHeader,
+          qualityNotes: localResult.qualityNotes,
+          extractionEngine: 'LOCAL_PADDLEOCR',
+        };
+
+        newDocsBatch.push(newDoc);
+        await saveDocumentImage(newDoc);
+
+        for (const r of localResult.records) {
+          currentSerial += 1;
+          newRecordsBatch.push({
+            ...r,
+            projectId: activeProject.id,
+            serialNumber: currentSerial,
+            verified: false, // OCR candidates start unverified
+          });
         }
 
-        const data = await response.json();
-
-        if (data.success && Array.isArray(data.records) && data.records.length > 0) {
-          const doc: SourceDocument = {
-            id: docId,
-            fileName: item.fileName,
-            dataUrl: item.previewUrl,
-            pageNumber: item.pageNumber,
-            uploadedAt: Date.now(),
-            recordCount: data.records.length,
-            detectedPageTotal: data.detectedPageTotal,
-            pageHeader: data.pageHeader || item.fileName,
-            qualityNotes: data.qualityNotes || '',
-          };
-
-          await saveDocumentImage(doc);
-          newDocsBatch.push(doc);
-
-          // Map extracted records
-          const mappedRecords: ExtractedRecord[] = data.records.map((r: any, idx: number) => ({
-            id: `rec-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 5)}`,
-            sourceImageId: docId,
-            sourcePage: item.pageNumber,
-            name: r.name,
-            amount: Math.abs(Number(r.amount)) || 0,
-            transactionType:
-              r.transactionType === 'EXPENSE'
-                ? 'EXPENSE'
-                : r.transactionType === 'INCOME'
-                ? 'INCOME'
-                : 'UNCLASSIFIED',
-            currency: r.currency || '₹',
-            paymentMode: r.paymentMode,
-            category: r.category,
-            purpose: r.purpose || '',
-            date: r.date || '',
-            householdName: r.householdName || '',
-            confidence: r.confidence,
-            ambiguityNotes: r.ambiguityNotes || '',
-            rawText: r.rawText || '',
-            verified: false, // Requires human confirmation!
-            createdAt: Date.now(),
-          }));
-
-          newRecordsBatch.push(...mappedRecords);
-          extractedCount += mappedRecords.length;
-        } else {
-          throw new Error(data.error || 'No recognizable ledger records found on this page.');
-        }
-      } catch (err: any) {
-        console.error('AI Extraction failed for item:', item.fileName, err);
-        failedErrors.push(`${item.fileName || `Page ${item.pageNumber}`}: ${err?.message || 'Extraction failed'}`);
+        extractedCount += localResult.records.length;
+      } catch (err) {
+        console.error('Scan error:', err);
       }
+    }
+
+    if (newRecordsBatch.length > 0) {
+      await saveEntries(newRecordsBatch);
+      setEntries((prev) => [...prev, ...newRecordsBatch]);
+      setDocuments((prev) => [...prev, ...newDocsBatch]);
     }
 
     setIsExtracting(false);
-
-    if (newDocsBatch.length > 0) {
-      setDocuments((prev) => [...prev, ...newDocsBatch]);
-      setRecords((prev) => [...prev, ...newRecordsBatch]);
-    }
-
-    if (failedErrors.length > 0 && newDocsBatch.length === 0) {
-      // Total failure - show error toast and fail closed
-      showToast(
-        settings.language === 'hi'
-          ? `❌ AI निष्कर्षण विफल: ${failedErrors[0]}। कृपया पुनः प्रयास करें।`
-          : `❌ Extraction failed: ${failedErrors[0]}. Please retry.`
-      );
-      return;
-    }
-
-    if (failedErrors.length > 0 && newDocsBatch.length > 0) {
-      // Partial failure
-      showToast(
-        settings.language === 'hi'
-          ? `⚠️ ${extractedCount} रिकॉर्ड्स निकाले गए, परंतु कुछ पन्नों में त्रुटि हुई: ${failedErrors.join('; ')}`
-          : `⚠️ Extracted ${extractedCount} records, but some pages failed: ${failedErrors.join('; ')}`
-      );
-      setCurrentTab('review');
-      return;
-    }
-
     showToast(
       settings.language === 'hi'
-        ? `🤖 AI ने सफलता से ${extractedCount} प्रविष्टियां निकालीं! अब समीक्षा करें।`
-        : `🤖 AI extracted ${extractedCount} records! Please review.`
+        ? `पर्चे से ${extractedCount} प्रविष्टियां खोजी गईं`
+        : `Extracted ${extractedCount} candidates`
     );
 
-    // Switch to Review Tab on success
-    setCurrentTab('review');
-  };
-
-  // Record Actions
-  const handleApproveRecord = (id: string) => {
-    setRecords((prev) =>
-      prev.map((r) => {
-        if (r.id !== id) return r;
-        if (r.transactionType === 'UNCLASSIFIED') return r; // Cannot verify without selecting transaction direction
-        return { ...r, verified: true };
-      })
-    );
-    showToast(settings.language === 'hi' ? '✓ रिकॉर्ड सत्यापित हुआ' : 'Record verified');
-  };
-
-  const handleApproveAll = (ids: string[]) => {
-    const idSet = new Set(ids);
-    setRecords((prev) =>
-      prev.map((r) => {
-        if (!idSet.has(r.id)) return r;
-        if (r.transactionType === 'UNCLASSIFIED') return r; // Skip unclassified records in bulk approval
-        return { ...r, verified: true };
-      })
-    );
-    showToast(
-      settings.language === 'hi'
-        ? `✓ रिकॉर्ड्स स्वीकृत एवं सत्यापित हुए`
-        : `Records verified`
-    );
-  };
-
-  const handleUpdateRecord = (
-    id: string,
-    updated: Partial<ExtractedRecord>,
-    reason: string = 'User manual edit'
-  ) => {
-    setRecords((prev) =>
-      prev.map((r) => {
-        if (r.id !== id) return r;
-
-        // Preserve audit trail if amount, name, paymentMode, or transactionType is modified
-        const hasChange =
-          (updated.name && updated.name !== r.name) ||
-          (updated.amount !== undefined && updated.amount !== r.amount) ||
-          (updated.paymentMode && updated.paymentMode !== r.paymentMode) ||
-          (updated.transactionType && updated.transactionType !== r.transactionType);
-
-        const auditTrail = hasChange
-          ? {
-              originalAIValue: r.auditTrail?.originalAIValue || {
-                name: r.name,
-                amount: r.amount,
-                transactionType: r.transactionType,
-                paymentMode: r.paymentMode,
-                category: r.category,
-                confidence: r.confidence,
-              },
-              userCorrectedValue: {
-                name: updated.name || r.name,
-                amount: updated.amount !== undefined ? updated.amount : r.amount,
-                transactionType: updated.transactionType || r.transactionType,
-                paymentMode: updated.paymentMode || r.paymentMode,
-                category: updated.category || r.category,
-              },
-              correctedAt: Date.now(),
-              correctedReason: reason,
-            }
-          : r.auditTrail;
-
-        return {
-          ...r,
-          ...updated,
-          auditTrail,
-        };
-      })
-    );
-
-    showToast(settings.language === 'hi' ? 'परिवर्तन सहेज लिए गए' : 'Record updated');
-  };
-
-  const handleDeleteRecord = (id: string) => {
-    setRecords((prev) => prev.filter((r) => r.id !== id));
-    showToast(settings.language === 'hi' ? 'रिकॉर्ड हटाया गया' : 'Record deleted');
-  };
-
-  const handleToggleUncertain = (id: string) => {
-    setRecords((prev) =>
-      prev.map((r) =>
-        r.id === id
-          ? {
-              ...r,
-              confidence: r.confidence === 'low' ? 'high' : 'low',
-              ambiguityNotes:
-                r.confidence === 'low'
-                  ? ''
-                  : 'Manually flagged as uncertain by human auditor.',
-            }
-          : r
-      )
-    );
-  };
-
-  // Duplicate Actions
-  const handleMergeDuplicate = (candidateId: string, mergedRecord: ExtractedRecord) => {
-    const candidate = duplicates.find((c) => c.id === candidateId);
-    if (!candidate) return;
-
-    // Remove the new record, update the existing record
-    setRecords((prev) =>
-      prev
-        .filter((r) => r.id !== candidate.newRecordId)
-        .map((r) => (r.id === candidate.existingRecordId ? mergedRecord : r))
-    );
-
-    setDuplicates((prev) =>
-      prev.map((c) => (c.id === candidateId ? { ...c, status: 'merged' } : c))
-    );
-
-    showToast(settings.language === 'hi' ? 'डुप्लिकेट सफलतापूर्वक मर्ज हुआ' : 'Duplicate merged');
-  };
-
-  const handleKeepSeparate = (candidateId: string) => {
-    setDuplicates((prev) =>
-      prev.map((c) => (c.id === candidateId ? { ...c, status: 'kept_separate' } : c))
-    );
-    showToast(settings.language === 'hi' ? 'दोनों प्रविष्टियां अलग रखी गईं' : 'Kept separate');
-  };
-
-  const handleIgnoreDuplicate = (candidateId: string) => {
-    setDuplicates((prev) =>
-      prev.map((c) => (c.id === candidateId ? { ...c, status: 'ignored' } : c))
-    );
-  };
-
-  // Update Document Handwritten Total (Deterministic Mathematical Validation)
-  const handleUpdateDocumentTotal = async (docId: string, newTotal: number | undefined) => {
-    setDocuments((prev) =>
-      prev.map((doc) => (doc.id === docId ? { ...doc, detectedPageTotal: newTotal } : doc))
-    );
-    const targetDoc = documents.find((d) => d.id === docId);
-    if (targetDoc) {
-      await saveDocumentImage({ ...targetDoc, detectedPageTotal: newTotal });
-    }
-    showToast(
-      settings.language === 'hi'
-        ? 'पृष्ठ कुल योग अद्यतन किया गया'
-        : 'Handwritten page total updated'
-    );
-  };
-
-  // View Source Document
-  const handleViewSource = (docId: string, recordId?: string) => {
-    setViewerDocId(docId);
-    setHighlightRecordId(recordId || null);
-  };
-
-  // Drilldown from Summary
-  const handleSummaryDrilldown = (filterType: string, filterValue: string) => {
     setCurrentTab('ledger');
   };
 
-  // Approve Proposed Reconciliation
-  const handleApproveProposedReconciliation = () => {
-    setRecords((prev) =>
-      prev.map((r) => (r.transactionType === 'UNCLASSIFIED' ? r : { ...r, verified: true }))
+  // If loading IndexedDB, render minimal neutral splash
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-stone-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-10 h-10 border-3 border-stone-300 border-t-emerald-700 rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-xs font-semibold text-stone-500">LedgerPilot...</p>
+        </div>
+      </div>
     );
-    showToast(
-      settings.language === 'hi'
-        ? '✓ प्रस्तावित सामंजस्य स्वीकृत हुआ! सभी वर्गीकृत रिकॉर्ड्स सत्यापित लेजर में दर्ज हुए।'
-        : 'Reconciliation approved! Classified records moved to verified ledger.'
+  }
+
+  // FIRST LAUNCH / ZERO PROJECTS: Show Welcome Onboarding Screen!
+  if (projects.length === 0 || !activeProject) {
+    return (
+      <>
+        <WelcomeOnboarding
+          onStartNewProject={() => setIsCreateProjectOpen(true)}
+          onRestoreBackup={(file) => handleRestoreBackupFile(file, 'replace')}
+          onLoadDemo={handleLoadDemoData}
+          language={settings.language}
+        />
+
+        <CreateProjectModal
+          isOpen={isCreateProjectOpen}
+          onClose={() => setIsCreateProjectOpen(false)}
+          onCreate={handleCreateProject}
+          language={settings.language}
+        />
+
+        {toastMessage && (
+          <div className="fixed bottom-6 right-4 z-50 bg-stone-900 text-white px-4 py-2.5 rounded-xl shadow-xl text-xs font-semibold animate-in fade-in">
+            {toastMessage}
+          </div>
+        )}
+      </>
     );
-    setCurrentTab('ledger');
-  };
+  }
 
-  // Create New Project (Single source of truth)
-  const handleCreateProject = (newProjectName: string, initialCategories: string[]) => {
-    const trimmed = newProjectName.trim() || 'New Ledger';
-    const newProj: ProjectMetadata = {
-      id: `proj-${Date.now()}`,
-      name: trimmed,
-      createdAt: Date.now(),
-    };
-    setActiveProject(newProj);
-    const updatedSettings: LedgerSettings = {
-      ...settings,
-      projectName: trimmed,
-      eventOrColony: trimmed,
-      categories: initialCategories.length > 0 ? initialCategories : DEFAULT_CATEGORIES,
-    };
-    setSettings(updatedSettings);
-
-    // Initialize clean state for the new project
-    setRecords([]);
-    setDocuments([]);
-    setHouseholds([]);
-    setDuplicates([]);
-    clearAllDocuments().catch(console.error);
-
-    try {
-      localStorage.setItem(STORAGE_KEY_PROJECT, JSON.stringify(newProj));
-      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(updatedSettings));
-      localStorage.removeItem(STORAGE_KEY_RECORDS);
-      localStorage.removeItem(STORAGE_KEY_HOUSEHOLDS);
-    } catch (e) {
-      console.error(e);
-    }
-
-    showToast(
-      settings.language === 'hi'
-        ? `नया प्रोजेक्ट "${trimmed}" तैयार है`
-        : `New project "${trimmed}" created`
-    );
-    setCurrentTab('dashboard');
-  };
-
-  // Update Settings
-  const handleUpdateSettings = (newSettings: LedgerSettings) => {
-    const updated: LedgerSettings = {
-      ...newSettings,
-      eventOrColony: newSettings.projectName,
-    };
-    setSettings(updated);
-    if (newSettings.projectName && newSettings.projectName !== activeProject.name) {
-      const updatedProj: ProjectMetadata = {
-        ...activeProject,
-        name: newSettings.projectName,
-      };
-      setActiveProject(updatedProj);
-      try {
-        localStorage.setItem(STORAGE_KEY_PROJECT, JSON.stringify(updatedProj));
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    try {
-      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(updated));
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  // Reset to initial sample data (Explicit DEMO fixture)
-  const handleResetSampleData = async () => {
-    await clearAllDocuments();
-    for (const doc of INITIAL_SAMPLE_DOCS) {
-      await saveDocumentImage(doc);
-    }
-    setDocuments(INITIAL_SAMPLE_DOCS);
-    setRecords(INITIAL_SAMPLE_RECORDS);
-    setHouseholds(SAMPLE_HOUSEHOLDS);
-    setActiveProject(DEMO_PROJECT_METADATA);
-    const demoSettings: LedgerSettings = {
-      ...settings,
-      projectName: DEMO_PROJECT_METADATA.name,
-      eventOrColony: DEMO_PROJECT_METADATA.name,
-    };
-    setSettings(demoSettings);
-    try {
-      localStorage.setItem(STORAGE_KEY_PROJECT, JSON.stringify(DEMO_PROJECT_METADATA));
-      localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(demoSettings));
-      localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(INITIAL_SAMPLE_RECORDS));
-      localStorage.setItem(STORAGE_KEY_HOUSEHOLDS, JSON.stringify(SAMPLE_HOUSEHOLDS));
-    } catch (e) {
-      console.error(e);
-    }
-    setIsSettingsOpen(false);
-    showToast(
-      settings.language === 'hi'
-        ? 'डेमो नमूना लेजर पुनः लोड किया गया'
-        : 'Demo sample ledger reloaded'
-    );
-  };
-
-  // Export JSON
-  const handleExportJSON = () => {
-    const backup = {
-      version: 1,
-      appName: 'LedgerPilot',
-      exportedAt: new Date().toISOString(),
-      settings,
-      records,
-      households,
-    };
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `LedgerPilot_Backup_${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  // Import JSON
-  const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const content = event.target?.result as string;
-        const parsed = JSON.parse(content);
-        if (parsed.records && Array.isArray(parsed.records)) {
-          setRecords(parsed.records);
-          if (parsed.households) setHouseholds(parsed.households);
-          if (parsed.settings) setSettings(parsed.settings);
-          showToast(settings.language === 'hi' ? 'बैकअप सफलता से बहाल किया गया!' : 'Backup restored!');
-          setIsSettingsOpen(false);
-        }
-      } catch (err) {
-        showToast('Invalid backup file');
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  // If Print view is active, render full printable sheet
+  // Full formal print view
   if (isPrintOpen) {
     return (
       <PrintView
-        records={records}
+        records={entries}
         documents={documents}
         settings={settings}
         onBack={() => setIsPrintOpen(false)}
@@ -680,83 +627,39 @@ export function App() {
     );
   }
 
-  const unverifiedCount = records.filter((r) => !r.verified).length;
-  const pendingDuplicateCount = duplicates.filter((d) => d.status === 'pending').length;
-  const exceptions = getLedgerExceptions(records, documents, duplicates);
+  const existingPartyNames = Array.from(new Set(entries.map((e) => e.name).filter(Boolean)));
+  const nextSerialNum =
+    entries.length > 0 ? Math.max(...entries.map((e) => e.serialNumber || 0)) + 1 : 1;
+  const unverifiedCount = entries.filter((e) => !e.verified).length;
 
   return (
-    <div className="min-h-screen bg-stone-50 text-stone-900 font-sans selection:bg-amber-100 flex flex-col">
-      {/* Top Sticky Navigation */}
+    <div className="min-h-screen bg-stone-50 text-stone-900 font-sans flex flex-col selection:bg-emerald-100">
+      {/* 1. Desktop & Mobile Top Bar */}
       <Navbar
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
-        unverifiedCount={unverifiedCount}
-        duplicateCount={pendingDuplicateCount}
-        exceptionCount={exceptions.length}
-        settings={settings}
-        onUpdateSettings={handleUpdateSettings}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        projects={projects}
+        activeProject={activeProject}
+        onSelectProject={handleSelectProject}
         onOpenCreateProject={() => setIsCreateProjectOpen(true)}
+        onOpenBackupModal={handleExportBackup}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        settings={settings}
+        onUpdateSettings={setSettings}
+        unverifiedCount={unverifiedCount}
       />
 
-      {/* Main Content Area */}
+      {/* 2. Main Content View Router */}
       <main className="flex-1">
         {currentTab === 'dashboard' && (
           <Dashboard
-            records={records}
+            records={entries}
             documents={documents}
             duplicates={duplicates}
             onSelectTab={setCurrentTab}
-            onViewSource={handleViewSource}
-            settings={settings}
-            language={settings.language}
-            onOpenCreateProject={() => setIsCreateProjectOpen(true)}
-          />
-        )}
-
-        {currentTab === 'inbox' && (
-          <ExceptionInbox
-            records={records}
-            documents={documents}
-            duplicates={duplicates}
-            onViewSource={handleViewSource}
-            onReviewRecord={(recordId) => {
-              setCurrentTab('review');
-            }}
-            onReviewDuplicate={(candidateId) => {
-              setCurrentTab('duplicates');
-            }}
-            onReviewPageTotal={(docId) => {
-              setCurrentTab('review');
-            }}
-            onUpdateRecord={handleUpdateRecord}
-            onNavigateToTab={setCurrentTab}
-            settings={settings}
-            language={settings.language}
-          />
-        )}
-
-        {currentTab === 'upload' && (
-          <UploadCapture
-            onStartExtraction={handleStartExtraction}
-            isExtracting={isExtracting}
-            settings={settings}
-            language={settings.language}
-          />
-        )}
-
-        {currentTab === 'review' && (
-          <ExtractionReview
-            records={records}
-            documents={documents}
-            onUpdateDocumentTotal={handleUpdateDocumentTotal}
-            onApproveRecord={handleApproveRecord}
-            onApproveAll={handleApproveAll}
-            onUpdateRecord={handleUpdateRecord}
-            onDeleteRecord={handleDeleteRecord}
-            onToggleUncertain={handleToggleUncertain}
-            onViewSource={handleViewSource}
-            onOpenAuditHistory={(rec) => setAuditRecord(rec)}
+            onOpenQuickEntry={() => setIsQuickEntryOpen(true)}
+            onOpenBackupModal={handleExportBackup}
+            onEditRecord={() => setCurrentTab('ledger')}
             settings={settings}
             language={settings.language}
           />
@@ -764,40 +667,12 @@ export function App() {
 
         {currentTab === 'ledger' && (
           <VerifiedLedger
-            records={records}
-            onViewSource={handleViewSource}
-            onOpenAuditHistory={(rec) => setAuditRecord(rec)}
+            records={entries}
+            onOpenQuickEntry={() => setIsQuickEntryOpen(true)}
+            onUpdateRecord={handleUpdateRecord}
             onDeleteRecord={handleDeleteRecord}
-            settings={settings}
-            language={settings.language}
-          />
-        )}
-
-        {currentTab === 'summary' && (
-          <ReconciliationSummary
-            records={records}
-            documents={documents}
-            duplicates={duplicates}
-            onDrilldown={handleSummaryDrilldown}
-            onApproveProposedReconciliation={handleApproveProposedReconciliation}
-            onViewSource={handleViewSource}
-            settings={settings}
-            language={settings.language}
-          />
-        )}
-
-        {currentTab === 'households' && (
-          <HouseholdManager
-            households={households}
-            records={records}
-            onAddHousehold={(h) => setHouseholds((prev) => [...prev, h])}
-            onUpdateHousehold={(id, updated) =>
-              setHouseholds((prev) => prev.map((h) => (h.id === id ? { ...h, ...updated } : h)))
-            }
-            onDeleteHousehold={(id) => setHouseholds((prev) => prev.filter((h) => h.id !== id))}
-            onViewHouseholdRecords={(name) => {
-              setCurrentTab('ledger');
-            }}
+            onViewSource={(docId) => setViewerDocId(docId)}
+            onOpenAuditHistory={(r) => setAuditRecord(r)}
             settings={settings}
             language={settings.language}
           />
@@ -805,56 +680,101 @@ export function App() {
 
         {currentTab === 'reports' && (
           <ReportsView
-            records={records}
+            records={entries}
             documents={documents}
-            onViewSource={handleViewSource}
             onOpenPrint={() => setIsPrintOpen(true)}
             settings={settings}
             language={settings.language}
           />
         )}
 
-        {currentTab === 'duplicates' && (
-          <DuplicateReviewModal
-            candidates={duplicates}
-            onMerge={handleMergeDuplicate}
-            onKeepSeparate={handleKeepSeparate}
-            onIgnore={handleIgnoreDuplicate}
-            onClose={() => setCurrentTab('review')}
-            language={settings.language}
-          />
+        {currentTab === 'scan' && (
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 pb-28 md:pb-12">
+            <div className="mb-4">
+              <h2 className="text-xl font-bold text-stone-900">
+                {settings.language === 'hi' ? '📷 पर्ची / रजिस्टर स्कैन' : 'Scan Page / Register'}
+              </h2>
+              <p className="text-xs text-stone-500 font-medium">
+                {settings.language === 'hi'
+                  ? 'हस्तलिखित पन्ने की फोटो से स्वचालित प्रविष्टियां निकालें (वैकल्पिक)'
+                  : 'Optionally scan handwritten pages into line items'}
+              </p>
+            </div>
+            <UploadCapture
+              onStartLocalExtraction={handleStartLocalExtraction}
+              isExtracting={isExtracting}
+              settings={settings}
+              language={settings.language}
+              aiBudgetStats={aiBudgetStats}
+              onUpdateSettings={setSettings}
+            />
+          </div>
         )}
-
-        {currentTab === 'local-ocr-test' && <LocalOCRTestLab />}
       </main>
 
-      {/* Mobile Bottom Navigation */}
+      {/* 3. Mobile Persistent Bottom Navigation */}
       <BottomNav
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
-        unverifiedCount={unverifiedCount}
-        exceptionCount={exceptions.length}
+        onOpenSettings={() => setIsSettingsOpen(true)}
         settings={settings}
+        unverifiedCount={unverifiedCount}
       />
 
-      {/* Original Image Viewer Modal */}
+      {/* 4. Mobile Persistent Floating Action Button (FAB) */}
+      <FloatingActionButton
+        onClick={() => setIsQuickEntryOpen(true)}
+        language={settings.language}
+      />
+
+      {/* 5. Quick Entry Modal (The primary manual creation flow) */}
+      <QuickEntryModal
+        isOpen={isQuickEntryOpen}
+        onClose={() => setIsQuickEntryOpen(false)}
+        onSave={handleSaveQuickEntry}
+        nextSerialNumber={nextSerialNum}
+        categories={settings.categories}
+        existingNames={existingPartyNames}
+        currency={settings.currency === 'INR' ? '₹' : settings.currency}
+        language={settings.language}
+      />
+
+      {/* 6. Create Project Modal */}
+      <CreateProjectModal
+        isOpen={isCreateProjectOpen}
+        onClose={() => setIsCreateProjectOpen(false)}
+        onCreate={handleCreateProject}
+        language={settings.language}
+      />
+
+      {/* 7. Settings & Backup Modal */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        settings={settings}
+        onSaveSettings={setSettings}
+        activeProject={activeProject}
+        onUpdateProjectName={handleUpdateProjectName}
+        onExportBackup={handleExportBackup}
+        onRestoreBackupFile={handleRestoreBackupFile}
+        onLoadDemoData={handleLoadDemoData}
+        onResetAllData={handleResetAllData}
+        language={settings.language}
+      />
+
+      {/* 8. Source Image Viewer Modal */}
       {viewerDocId && (
         <SourceImageViewer
           documents={documents}
           currentDocId={viewerDocId}
-          highlightRecordId={highlightRecordId}
-          records={records}
-          onUpdateDocumentTotal={handleUpdateDocumentTotal}
-          onClose={() => {
-            setViewerDocId(null);
-            setHighlightRecordId(null);
-          }}
+          records={entries}
+          onClose={() => setViewerDocId(null)}
           onSelectDoc={(id) => setViewerDocId(id)}
           language={settings.language}
         />
       )}
 
-      {/* Audit History Modal */}
+      {/* 9. Audit History Modal */}
       {auditRecord && (
         <AuditHistoryModal
           record={auditRecord}
@@ -863,34 +783,14 @@ export function App() {
         />
       )}
 
-      {/* Settings Modal */}
-      {isSettingsOpen && (
-        <SettingsModal
-          settings={settings}
-          onSaveSettings={handleUpdateSettings}
-          onResetSampleData={handleResetSampleData}
-          onExportJSON={handleExportJSON}
-          onImportJSON={handleImportJSON}
-          onClose={() => setIsSettingsOpen(false)}
-          language={settings.language}
-        />
-      )}
-
-      {/* Create New Project Modal */}
-      <CreateProjectModal
-        isOpen={isCreateProjectOpen}
-        onClose={() => setIsCreateProjectOpen(false)}
-        onCreate={handleCreateProject}
-        language={settings.language}
-      />
-
-      {/* Toast Notification */}
+      {/* 10. Global Toast */}
       {toastMessage && (
-        <div className="fixed bottom-18 md:bottom-6 right-4 z-50 bg-stone-900 text-white px-4 py-2.5 rounded-2xl shadow-xl border border-stone-700 text-xs font-semibold animate-in fade-in slide-in-from-bottom-2 flex items-center gap-2">
+        <div className="fixed bottom-20 md:bottom-6 right-4 z-50 bg-stone-900 text-white px-4 py-2.5 rounded-xl shadow-xl text-xs font-semibold animate-in fade-in flex items-center gap-2">
           <span>{toastMessage}</span>
         </div>
       )}
     </div>
   );
 }
+
 export default App;

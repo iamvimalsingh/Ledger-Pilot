@@ -9,13 +9,15 @@
     "start": "tsx server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "tsx scripts/verify-v2.ts"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
+    "@paddleocr/paddleocr-js": "^0.4.2",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
     "dotenv": "^17.2.3",

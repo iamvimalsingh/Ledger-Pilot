@@ -4,6 +4,8 @@ export type ExceptionType =
   | 'POSSIBLE_DUPLICATE'
   | 'MISSING_FIELD'
   | 'TRANSACTION_TYPE_REQUIRED'
+  | 'ROW_STRUCTURE_REVIEW'
+  | 'AMBIGUOUS_AMOUNT'
   | 'CONFLICT';
 
 export type ExceptionSeverity = 'HIGH' | 'MEDIUM';
@@ -20,6 +22,7 @@ export interface LedgerException {
   docId?: string;
   sourceImageId?: string;
   sourcePage?: number;
+  sourceRow?: number;
   candidateId?: string;
   createdAt: number;
   resolutionState: ExceptionResolutionState;
@@ -44,6 +47,8 @@ export interface ExceptionSummary {
   duplicateCount: number;
   missingFieldCount: number;
   typeRequiredCount: number;
+  rowStructureCount: number;
+  ambiguousAmountCount: number;
   conflictCount: number;
   highSeverityCount: number;
   mediumSeverityCount: number;

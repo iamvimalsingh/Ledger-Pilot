@@ -245,6 +245,8 @@ export function calculateExceptionSummary(exceptions: LedgerException[]): Except
   let duplicateCount = 0;
   let missingFieldCount = 0;
   let typeRequiredCount = 0;
+  let rowStructureCount = 0;
+  let ambiguousAmountCount = 0;
   let conflictCount = 0;
   let highSeverityCount = 0;
   let mediumSeverityCount = 0;
@@ -269,6 +271,12 @@ export function calculateExceptionSummary(exceptions: LedgerException[]): Except
       case 'TRANSACTION_TYPE_REQUIRED':
         typeRequiredCount++;
         break;
+      case 'ROW_STRUCTURE_REVIEW':
+        rowStructureCount++;
+        break;
+      case 'AMBIGUOUS_AMOUNT':
+        ambiguousAmountCount++;
+        break;
       case 'CONFLICT':
         conflictCount++;
         break;
@@ -282,6 +290,8 @@ export function calculateExceptionSummary(exceptions: LedgerException[]): Except
     duplicateCount,
     missingFieldCount,
     typeRequiredCount,
+    rowStructureCount,
+    ambiguousAmountCount,
     conflictCount,
     highSeverityCount,
     mediumSeverityCount,

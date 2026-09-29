@@ -659,6 +659,34 @@ export const ExtractionReview: React.FC<ExtractionReviewProps> = ({
                     <div className="flex items-center flex-wrap gap-2 mb-1">
                       <span className="font-bold text-base text-stone-900">{rec.name}</span>
 
+                      {/* Source Engine Pill */}
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border ${
+                          rec.extractionSource === 'AI_ASSISTED'
+                            ? 'bg-amber-50 text-amber-900 border-amber-300'
+                            : 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                        }`}
+                      >
+                        {rec.extractionSource === 'AI_ASSISTED' ? (
+                          <>
+                            <Sparkles className="w-3 h-3 text-amber-600" />
+                            <span>AI Assisted</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                            <span>Local OCR</span>
+                          </>
+                        )}
+                      </span>
+
+                      {/* Source Row Badge */}
+                      {rec.sourceRow && (
+                        <span className="text-[10px] font-mono font-bold bg-stone-100 text-stone-700 px-1.5 py-0.5 rounded border border-stone-200">
+                          Row #{rec.sourceRow}
+                        </span>
+                      )}
+
                       {/* Transaction Type Pill */}
                       {rec.transactionType === 'UNCLASSIFIED' ? (
                         <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full flex items-center gap-1 bg-amber-100 text-amber-900 border border-amber-300 animate-pulse">
@@ -846,14 +874,16 @@ export const ExtractionReview: React.FC<ExtractionReviewProps> = ({
 
                     <div className="flex items-center gap-1.5">
                       {/* View Source Image */}
-                      <button
-                        onClick={() => onViewSource(rec.sourceImageId, rec.id)}
-                        className="p-1.5 text-stone-600 hover:text-amber-800 hover:bg-amber-50 rounded-lg border border-stone-200 transition text-xs flex items-center gap-1"
-                        title={isHi ? 'स्रोत देखें (Original Page)' : 'View Original Handwritten Source'}
-                      >
-                        <Eye className="w-3.5 h-3.5 text-amber-600" />
-                        <span className="text-[11px] font-semibold">{isHi ? 'स्रोत देखें' : 'Source'}</span>
-                      </button>
+                      {rec.sourceImageId && (
+                        <button
+                          onClick={() => onViewSource(rec.sourceImageId!, rec.id)}
+                          className="p-1.5 text-stone-600 hover:text-amber-800 hover:bg-amber-50 rounded-lg border border-stone-200 transition text-xs flex items-center gap-1"
+                          title={isHi ? 'स्रोत देखें (Original Page)' : 'View Original Handwritten Source'}
+                        >
+                          <Eye className="w-3.5 h-3.5 text-amber-600" />
+                          <span className="text-[11px] font-semibold">{isHi ? 'स्रोत देखें' : 'Source'}</span>
+                        </button>
+                      )}
 
                       {/* Edit */}
                       <button

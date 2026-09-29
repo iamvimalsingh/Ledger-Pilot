@@ -8,7 +8,7 @@ export interface WhatsAppSummaryOptions {
 }
 
 export function generateWhatsAppSummary({
-  title = 'संग्रह विवरण (Collection Summary)',
+  title = 'मेरा हिसाब',
   records,
   includeTopDonors = false,
 }: WhatsAppSummaryOptions): string {
@@ -20,51 +20,51 @@ export function generateWhatsAppSummary({
   });
 
   const lines: string[] = [
-    `📊 *${title}*`,
+    `📋 *मेरा हिसाब: ${title}*`,
     `📅 दिनांक: ${now}`,
     `━━━━━━━━━━━━━━━━━━━`,
-    `💰 *कुल आय (Income):* ${formatINR(metrics.verifiedIncome)}`,
-    `💸 *कुल व्यय (Expense):* ${formatINR(metrics.verifiedExpense)}`,
-    `⚖️ *शुद्ध शेष (Net Balance):* ${formatINR(metrics.netBalance)}`,
+    `💰 *कुल आय:* ${formatINR(metrics.verifiedIncome)}`,
+    `💸 *कुल खर्च:* ${formatINR(metrics.verifiedExpense)}`,
+    `⚖️ *शेष:* ${formatINR(metrics.netBalance)}`,
     ``,
-    `💳 *ऑनलाइन आय (Online):* ${formatINR(metrics.onlineIncome)}`,
-    `💵 *कैश आय (Cash):* ${formatINR(metrics.cashIncome)}`,
+    `📝 *कुल entries:* ${records.length}`,
   ];
 
-  if (metrics.otherTotal > 0) {
-    lines.push(`📦 *अन्य (Other):* ${formatINR(metrics.otherTotal)}`);
+  if (metrics.onlineTotal > 0 || metrics.cashTotal > 0) {
+    lines.push(``);
+    lines.push(`💳 *ऑनलाइन:* ${formatINR(metrics.onlineTotal)}  |  💵 *नकद:* ${formatINR(metrics.cashTotal)}`);
   }
 
-  lines.push(`━━━━━━━━━━━━━━━━━━━`);
-  lines.push(`📂 *श्रेणीवार विवरण (Categories):*`);
+  if (Object.keys(metrics.categoryTotals).length > 0) {
+    lines.push(`━━━━━━━━━━━━━━━━━━━`);
+    lines.push(`📂 *श्रेणीवार विवरण:*`);
 
-  // Sort categories by highest amount
-  const sortedCategories = Object.entries(metrics.categoryTotals).sort(
-    ([, a], [, b]) => b.total - a.total
-  );
+    // Sort categories by highest amount
+    const sortedCategories = Object.entries(metrics.categoryTotals).sort(
+      ([, a], [, b]) => b.total - a.total
+    );
 
-  for (const [catName, data] of sortedCategories) {
-    lines.push(`• ${catName}: ${formatINR(data.total)} (${data.count} रसीदें)`);
+    for (const [catName, data] of sortedCategories) {
+      lines.push(`• ${catName}: ${formatINR(data.total)} (${data.count} entries)`);
+    }
   }
-
-  lines.push(`━━━━━━━━━━━━━━━━━━━`);
-  lines.push(`📝 *कुल सत्यापित रिकॉर्ड्स:* ${metrics.verifiedRecordsCount} / ${metrics.totalRecords}`);
 
   if (includeTopDonors && records.length > 0) {
-    const topDonors = records
-      .filter((r) => r.verified && r.transactionType === 'INCOME')
+    const topEntries = records
+      .filter((r) => r.verified)
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 5);
 
     lines.push(``);
-    lines.push(`🌟 *मुख्य सहयोगी (Top Contributions):*`);
-    topDonors.forEach((d, idx) => {
-      lines.push(`${idx + 1}. ${d.name}: ${formatINR(d.amount)} (${d.paymentMode})`);
+    lines.push(`⭐ *प्रमुख लेन-देन:*`);
+    topEntries.forEach((d, idx) => {
+      const typeSign = d.transactionType === 'INCOME' ? '+' : '-';
+      lines.push(`${idx + 1}. ${d.name}: ${typeSign}${formatINR(d.amount)} (${d.paymentMode})`);
     });
   }
 
   lines.push(``);
-  lines.push(`_LedgerPilot डिजिटल खाता प्रणाली द्वारा सत्यापित_`);
+  lines.push(`_LedgerPilot — सरल डिजिटल बहीखाता_`);
 
   return lines.join('\n');
 }
